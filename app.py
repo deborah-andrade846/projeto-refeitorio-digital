@@ -159,7 +159,7 @@ elif nome_selecionado:
             st.write("**Quantas garrafas de cada tamanho você está levando?**")
             
             # Contadores lado a lado
-            c1, c2, c3, c4 = st.columns(4)
+            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
             with c1: qtd_05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
             with c2: qtd_10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
             with c3: qtd_15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
