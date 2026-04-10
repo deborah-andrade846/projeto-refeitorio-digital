@@ -85,11 +85,11 @@ if nome_selecionado == "➕ NOVO CADASTRO...":
                 st.error(f"Erro ao salvar: {e}")
 
 # ==========================================
-# FLUXO 2: SELEÇÃO E CONFIRMAÇÃO
+# FLUXO 2: SELEÇÃO E CONFIRMAÇÃO (Totem Simplificado)
 # ==========================================
 elif nome_selecionado:
     
-    # TELA A: MENU PRINCIPAL (Só aparece se nada foi selecionado ainda)
+    # TELA A: MENU PRINCIPAL
     if not st.session_state.item_selecionado:
         st.write(f"### Olá, **{nome_selecionado}**!")
         st.write("**O que você vai retirar agora?**")
@@ -121,62 +121,91 @@ elif nome_selecionado:
                 st.rerun()
             if not pode_jantar: st.caption(msg_jantar)
 
-    # TELA B: DETALHES E CONFIRMAÇÃO (Foco total no item escolhido)
+    # TELA B: DETALHES E CONFIRMAÇÃO (Com Múltiplas Quantidades)
     else:
         item = st.session_state.item_selecionado
         
-        st.warning("⚠️ **Confirme os dados do seu registro:**")
+        st.warning("⚠️ **Confirme as quantidades do seu registro:**")
         st.write(f"**Colaborador:** {nome_selecionado}")
         st.write(f"**Item selecionado:** {item}")
         
-        detalhe_final = "1 UN" # Valor padrão
+        # Essa lista vai guardar as "linhas" que vão para o banco de dados
+        lista_para_salvar = [] 
         
-        # Opções específicas dependendo do item
+        # --- LÓGICA DE BEBIDAS (Múltiplas garrafas e tamanhos) ---
         if item in ["CAFÉ", "CHÁ"]:
-            opcao = st.radio("Selecione o volume:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L", "Outro..."], horizontal=True)
-            if opcao == "Outro...":
-                litros = st.number_input("Digite os litros:", min_value=0.1, max_value=10.0, step=0.1)
-                detalhe_final = f"{litros} L"
-            else:
-                detalhe_final = opcao
-                
-        elif item == "MARMITA":
-            qtd = st.number_input("Quantidade de Marmitas:", min_value=1, max_value=5, step=1)
-            detalhe_final = f"{qtd} UN"
+            st.write("**Quantas garrafas de cada tamanho você está levando?**")
             
-        else: # Almoço / Jantar (Travado em 1 unidade)
-            st.info("Regra Corporativa: Limite de 1 unidade por registro.")
-            detalhe_final = "1 UN"
+            # Contadores lado a lado
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: qtd_05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
+            with c2: qtd_10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
+            with c3: qtd_15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
+            with c4: qtd_20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
+            
+            st.write("**Outro tamanho de garrafa?**")
+            c_out1, c_out2 = st.columns(2)
+            with c_out1: litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
+            with c_out2: qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
+
+            # O sistema gera uma linha no banco para CADA garrafa selecionada
+            for _ in range(qtd_05): lista_para_salvar.append("0.5 L")
+            for _ in range(qtd_10): lista_para_salvar.append("1.0 L")
+            for _ in range(qtd_15): lista_para_salvar.append("1.5 L")
+            for _ in range(qtd_20): lista_para_salvar.append("2.0 L")
+            for _ in range(qtd_outro): 
+                if litro_outro > 0: lista_para_salvar.append(f"{litro_outro} L")
+                
+        # --- LÓGICA DE MARMITA (Múltiplas quantidades) ---
+        elif item == "MARMITA":
+            qtd_marmitas = st.number_input("Quantidade de Marmitas:", min_value=1, max_value=10, step=1)
+            for _ in range(qtd_marmitas):
+                lista_para_salvar.append("1 UN") # Gera várias linhas de 1 UN
+            
+        # --- LÓGICA DE ALMOÇO / JANTAR (Travado em 1 unidade) ---
+        else: 
+            st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
+            lista_para_salvar.append("1 UN")
 
         st.markdown("---")
-        assinatura = st.checkbox("Declaro que estou retirando este item (Assinatura Eletrônica)")
+        
+        # VALIDAÇÃO: Impede envio de carrinho vazio (ex: pessoa marcou 0 garrafas)
+        total_itens = len(lista_para_salvar)
+        if total_itens == 0:
+            st.error("⚠️ Adicione a quantidade de garrafas antes de confirmar.")
+            
+        assinatura = st.checkbox(f"Declaro que estou retirando {total_itens} item(ns).", disabled=(total_itens == 0))
         
         # Botões de Ação
         c_cancela, c_confirma = st.columns(2)
         
         with c_cancela:
             if st.button("❌ CANCELAR E VOLTAR", use_container_width=True):
-                st.session_state.item_selecionado = None # Limpa a memória e volta pro menu
+                st.session_state.item_selecionado = None 
                 st.rerun()
 
         with c_confirma:
+            # O botão verde só liga se a pessoa tiver escolhido algo > 0 e assinado
             if st.button("✅ CONFIRMAR REGISTRO", use_container_width=True, disabled=not assinatura, type="primary"):
                 try:
                     cod_auditoria = str(uuid.uuid4())[:8].upper()
+                    data_hoje = datetime.now().strftime("%d/%m/%Y")
+                    hora_agora = datetime.now().strftime("%H:%M:%S")
                     
-                    dados_bd = {
-                        "data": datetime.now().strftime("%d/%m/%Y"),
-                        "hora": datetime.now().strftime("%H:%M:%S"),
-                        "colaborador": nome_selecionado,
-                        "tipo": item,
-                        "litros": detalhe_final,
-                        "codigo_auditoria": cod_auditoria
-                    }
-                    
-                    supabase.table("registros").insert(dados_bd).execute()
+                    # Salva CADA item da lista como uma linha independente no Supabase
+                    for litragem in lista_para_salvar:
+                        dados_bd = {
+                            "data": data_hoje,
+                            "hora": hora_agora,
+                            "colaborador": nome_selecionado,
+                            "tipo": item,
+                            "litros": litragem,
+                            "codigo_auditoria": cod_auditoria
+                        }
+                        supabase.table("registros").insert(dados_bd).execute()
                     
                     st.success(f"✅ Registrado com sucesso! Cód: {cod_auditoria}")
-                    st.session_state.item_selecionado = None # Esvazia a tela para o próximo
+                    st.session_state.item_selecionado = None
                     st.balloons()
                     
                 except Exception as e:
