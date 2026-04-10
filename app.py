@@ -66,42 +66,49 @@ if nome_selecionado == "➕ NOVO CADASTRO...":
     # (Mantenha seu código de cadastro aqui...)
     pass
 
+# ==========================================
+# FLUXO DE REGISTRO (Corrigido com Memória de Estado)
+# ==========================================
 elif nome_selecionado:
     st.write(f"### Olá, **{nome_selecionado}**!")
     
+    # Cria a memória para saber qual botão foi clicado
+    if 'menu_ativo' not in st.session_state:
+        st.session_state.menu_ativo = None
+
     # 1. SELEÇÃO DE ITENS
     st.write("**O que você está levando?**")
     col1, col2, col3, col4, col5 = st.columns(5)
     
-    item_atual = None
     with col1:
-        if st.button("☕\nCAFÉ"): item_atual = "CAFÉ"
+        if st.button("☕\nCAFÉ"): st.session_state.menu_ativo = "CAFÉ"
     with col2:
-        if st.button("🍵\nCHÁ"): item_atual = "CHÁ"
+        if st.button("🍵\nCHÁ"): st.session_state.menu_ativo = "CHÁ"
     with col3:
-        if st.button("🍱\nMARMITA"): item_atual = "MARMITA"
+        if st.button("🍱\nMARMITA"): st.session_state.menu_ativo = "MARMITA"
     with col4:
-        # Validação para Almoço
         pode_almoco, msg_almoco = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
-        if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): item_atual = "ALMOÇO"
+        if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): st.session_state.menu_ativo = "ALMOÇO"
         if not pode_almoco: st.caption(msg_almoco)
     with col5:
-        # Validação para Jantar
         pode_jantar, msg_jantar = verificar_trava_tempo(nome_selecionado, "JANTAR")
-        if st.button("🌙\nJANTAR", disabled=not pode_jantar): item_atual = "JANTAR"
+        if st.button("🌙\nJANTAR", disabled=not pode_jantar): st.session_state.menu_ativo = "JANTAR"
         if not pode_jantar: st.caption(msg_jantar)
 
-    # 2. DETALHAMENTO DO ITEM SELECIONADO
-    if item_atual:
-        st.markdown(f"#### Detalhando: {item_atual}")
+    # 2. DETALHAMENTO DO ITEM (Só aparece se algo estiver na memória)
+    if st.session_state.menu_ativo:
+        item = st.session_state.menu_ativo
+        st.markdown(f"#### Detalhando: {item}")
         detalhe = "1 UN" # Padrão
         
-        if item_atual in ["CAFÉ", "CHÁ"]:
-            detalhe = st.radio("Litragem:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L", "Outro"], horizontal=True)
-            if detalhe == "Outro":
+        if item in ["CAFÉ", "CHÁ"]:
+            opcao = st.radio("Litragem:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L", "Outro"], horizontal=True)
+            if opcao == "Outro":
                 detalhe = f"{st.number_input('Litros:', 0.1, 10.0, 1.0)} L"
+            else:
+                detalhe = opcao
         
-        elif item_atual == "MARMITA":
+        elif item == "MARMITA":
             qtd = st.number_input("Quantidade de Marmitas:", 1, 5, 1)
             detalhe = f"{qtd} UN"
         
@@ -109,36 +116,42 @@ elif nome_selecionado:
             st.info("Regra: Limite de 1 refeição por pessoa.")
             detalhe = "1 UN"
 
-        if st.button(f"➕ ADICIONAR {item_atual} À LISTA"):
-            st.session_state.cesta.append({"tipo": item_atual, "detalhe": detalhe})
-            st.toast("Adicionado!")
+        # O botão que salva na lista
+        if st.button(f"➕ CONFIRMAR {item} NA LISTA", type="secondary"):
+            st.session_state.cesta.append({"tipo": item, "detalhe": detalhe})
+            st.session_state.menu_ativo = None # Limpa a memória para fechar esse menu
+            st.rerun() # Pisca a tela para atualizar na hora!
 
-    # 3. FINALIZAÇÃO (Cesta e Assinatura)
-    if st.session_state.cesta:
+    # 3. FINALIZAÇÃO (A Cesta e o Botão Final)
+    if len(st.session_state.cesta) > 0:
         st.write("---")
-        st.write("### 🛒 Resumo da Retirada")
-        for i, r in enumerate(st.session_state.cesta):
-            st.write(f"{i+1}. {r['tipo']} ({r['detalhe']})")
+        st.write("### 🛒 Sua Lista de Retirada")
         
-        if st.button("🗑️ Limpar"):
+        # Mostra tudo que está no carrinho
+        for i, r in enumerate(st.session_state.cesta):
+            st.write(f"**{i+1}.** {r['tipo']} ({r['detalhe']})")
+        
+        if st.button("🗑️ Limpar Lista"):
             st.session_state.cesta = []
             st.rerun()
 
-        assinatura = st.checkbox("Confirmo a retirada dos itens acima")
+        st.markdown("---")
+        assinatura = st.checkbox("Confirmo a retirada dos itens acima (Assinatura Eletrônica)")
         
-        if st.button("🚀 FINALIZAR REGISTRO", disabled=not assinatura, type="primary"):
+        # O botão de enviar para o banco de dados
+        if st.button("🚀 FINALIZAR REGISTRO NO SISTEMA", disabled=not assinatura, type="primary"):
             try:
                 cod = str(uuid.uuid4())[:8].upper()
                 dt, hr = datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%H:%M:%S")
                 
-                for item in st.session_state.cesta:
+                for item_cesta in st.session_state.cesta:
                     supabase.table("registros").insert({
                         "data": dt, "hora": hr, "colaborador": nome_selecionado,
-                        "tipo": item['tipo'], "litros": item['detalhe'], "codigo_auditoria": cod
+                        "tipo": item_cesta['tipo'], "litros": item_cesta['detalhe'], "codigo_auditoria": cod
                     }).execute()
                 
-                st.success(f"Registrado! Cód: {cod}")
-                st.session_state.cesta = []
+                st.success(f"✅ Tudo registrado! Cód. Auditoria: {cod}")
+                st.session_state.cesta = [] # Esvazia a cesta depois de salvar
                 st.balloons()
             except Exception as e:
-                st.error(f"Erro: {e}")
+                st.error(f"Erro ao salvar: {e}")
