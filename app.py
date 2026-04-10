@@ -71,8 +71,8 @@ if nome_selecionado == "➕ NOVO CADASTRO...":
     
     # Novos campos de entrada
     novo_nome = st.text_input("Nome Completo (Obrigatório):").strip().upper()
-    nova_empresa = st.text_input("Empresa (Obrigatório - Ex: AURA, APOENA, TERCEIRIZADA):").strip().upper()
-    nova_matricula = st.text_input("Matrícula (Opcional):").strip().upper()
+    nova_empresa = st.text_input("Empresa (Obrigatório - Ex: AURA, SERT, G3):").strip().upper()
+    nova_matricula = st.text_input("Matrícula:").strip().upper()
     
     if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
         
