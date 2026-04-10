@@ -47,9 +47,12 @@ if nome_selecionado:
 
     if registro_tipo:
         try:
-            # Tenta ler os dados, se falhar, cria um novo
+            # 1. DIGITE AQUI O NOME DA ABA QUE ESTÁ LÁ NO RODAPÉ DA PLANILHA
+            nome_aba = "datetime.now().strftime("%B_%Y")" 
+
             try:
-                df_existente = conn.read()
+                # Tentamos ler a aba. Se der erro (aba vazia), ele cria o cabeçalho
+                df_existente = conn.read(worksheet=nome_aba)
             except:
                 df_existente = pd.DataFrame(columns=["DATA", "HORA", "COLABORADOR", "TIPO", "LITROS"])
 
@@ -61,11 +64,19 @@ if nome_selecionado:
                 "LITROS": volume
             }])
 
+            # Limpa linhas vazias que o Google Sheets às vezes traz
+            df_existente = df_existente.dropna(how='all')
+
             df_final = pd.concat([df_existente, novo_dado], ignore_index=True)
-            conn.update(data=df_final) # Envia para o Google Sheets
+            
+            # 2. AQUI TAMBÉM PRECISA DO NOME DA ABA
+            conn.update(worksheet=nome_aba, data=df_final) 
             
             st.success("✅ Registrado com sucesso!")
-            del st.session_state.tipo
             st.balloons()
+            # Limpa o estado para o próximo colega usar
+            if 'tipo' in st.session_state:
+                del st.session_state.tipo
+                
         except Exception as e:
-            st.error(f"Erro ao salvar: Verifique se a planilha está como 'Editor' para qualquer pessoa com o link.")
+            st.error(f"Erro técnico: {e}")
