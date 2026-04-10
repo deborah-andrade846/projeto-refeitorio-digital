@@ -1,10 +1,10 @@
 import streamlit as st
 from supabase import create_client, Client
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
-# 1. CONFIGURAÇÃO VISUAL E CONEXÃO
-st.set_page_config(page_title="Totem Refeitório", layout="centered")
+# 1. CONFIGURAÇÃO E CONEXÃO
+st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
 
 @st.cache_resource
 def init_connection():
@@ -14,111 +14,131 @@ def init_connection():
 
 try:
     supabase: Client = init_connection()
-except Exception as e:
-    st.error("Erro de conexão com o banco.")
+except:
+    st.error("Erro de conexão.")
+
+# --- FUNÇÕES DE APOIO ---
+
+def buscar_nomes():
+    res = supabase.table("colaboradores").select("nome").execute()
+    return sorted([linha["nome"] for linha in res.data])
+
+def verificar_trava_tempo(nome, tipo_refeicao):
+    """Verifica se houve Almoço/Jantar nas últimas 4 horas"""
+    if tipo_refeicao not in ["ALMOÇO", "JANTAR"]:
+        return True, "" # Café e Marmita não têm trava de tempo
+    
+    agora = datetime.now()
+    quatro_horas_atras = (agora - timedelta(hours=4)).strftime("%H:%M:%S")
+    data_hoje = agora.strftime("%d/%m/%Y")
+    
+    # Busca o último registro desse tipo hoje para esse colaborador
+    res = supabase.table("registros")\
+        .select("hora")\
+        .eq("colaborador", nome)\
+        .eq("data", data_hoje)\
+        .eq("tipo", tipo_refeicao)\
+        .order("hora", desc=True)\
+        .limit(1)\
+        .execute()
+    
+    if res.data:
+        ultima_hora = datetime.strptime(res.data[0]['hora'], "%H:%M:%S")
+        diferenca = agora - datetime.combine(agora.date(), ultima_hora.time())
+        
+        if diferenca.total_seconds() < 14400: # 14400 segundos = 4 horas
+            return False, f"Bloqueado: Você já registrou {tipo_refeicao} há menos de 4h."
+            
+    return True, ""
+
+# --- INTERFACE ---
 
 st.title("🚀 Registro Digital - Refeitório")
 st.markdown("---")
 
-# 2. BUSCANDO A LISTA DE NOMES DO BANCO DE DADOS
-# Essa função vai no Supabase e traz todos os nomes cadastrados
-def buscar_nomes():
-    try:
-        resposta = supabase.table("colaboradores").select("nome").execute()
-        lista = [linha["nome"] for linha in resposta.data]
-        return sorted(lista) # Coloca em ordem alfabética
-    except:
-        return []
+nomes = buscar_nomes()
+nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes, index=None)
 
-lista_banco = buscar_nomes()
-# Adicionamos a opção de "Novo Cadastro" no topo da lista
-opcoes_dropdown = ["➕ NOVO CADASTRO..."] + lista_banco
+if 'cesta' not in st.session_state:
+    st.session_state.cesta = []
 
-nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", opcoes_dropdown, index=None, placeholder="Clique para buscar seu nome...")
-
-# ==========================================
-# FLUXO A: TELA DE NOVO CADASTRO
-# ==========================================
 if nome_selecionado == "➕ NOVO CADASTRO...":
-    st.info("📝 **Primeiro Acesso:** Preencha seus dados para ser incluído no sistema.")
-    novo_nome = st.text_input("Digite seu Nome Completo:").strip().upper()
+    # (Mantenha seu código de cadastro aqui...)
+    pass
+
+elif nome_selecionado:
+    st.write(f"### Olá, **{nome_selecionado}**!")
     
-    if st.button("💾 SALVAR MEU CADASTRO", use_container_width=True):
-        if novo_nome == "":
-            st.error("Por favor, digite um nome válido.")
-        elif novo_nome in lista_banco:
-            st.warning("Este nome já consta no sistema! Selecione-o na lista acima.")
-        else:
+    # 1. SELEÇÃO DE ITENS
+    st.write("**O que você está levando?**")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    item_atual = None
+    with col1:
+        if st.button("☕\nCAFÉ"): item_atual = "CAFÉ"
+    with col2:
+        if st.button("🍵\nCHÁ"): item_atual = "CHÁ"
+    with col3:
+        if st.button("🍱\nMARMITA"): item_atual = "MARMITA"
+    with col4:
+        # Validação para Almoço
+        pode_almoco, msg_almoco = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
+        if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): item_atual = "ALMOÇO"
+        if not pode_almoco: st.caption(msg_almoco)
+    with col5:
+        # Validação para Jantar
+        pode_jantar, msg_jantar = verificar_trava_tempo(nome_selecionado, "JANTAR")
+        if st.button("🌙\nJANTAR", disabled=not pode_jantar): item_atual = "JANTAR"
+        if not pode_jantar: st.caption(msg_jantar)
+
+    # 2. DETALHAMENTO DO ITEM SELECIONADO
+    if item_atual:
+        st.markdown(f"#### Detalhando: {item_atual}")
+        detalhe = "1 UN" # Padrão
+        
+        if item_atual in ["CAFÉ", "CHÁ"]:
+            detalhe = st.radio("Litragem:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L", "Outro"], horizontal=True)
+            if detalhe == "Outro":
+                detalhe = f"{st.number_input('Litros:', 0.1, 10.0, 1.0)} L"
+        
+        elif item_atual == "MARMITA":
+            qtd = st.number_input("Quantidade de Marmitas:", 1, 5, 1)
+            detalhe = f"{qtd} UN"
+        
+        else: # Almoço ou Jantar
+            st.info("Regra: Limite de 1 refeição por pessoa.")
+            detalhe = "1 UN"
+
+        if st.button(f"➕ ADICIONAR {item_atual} À LISTA"):
+            st.session_state.cesta.append({"tipo": item_atual, "detalhe": detalhe})
+            st.toast("Adicionado!")
+
+    # 3. FINALIZAÇÃO (Cesta e Assinatura)
+    if st.session_state.cesta:
+        st.write("---")
+        st.write("### 🛒 Resumo da Retirada")
+        for i, r in enumerate(st.session_state.cesta):
+            st.write(f"{i+1}. {r['tipo']} ({r['detalhe']})")
+        
+        if st.button("🗑️ Limpar"):
+            st.session_state.cesta = []
+            st.rerun()
+
+        assinatura = st.checkbox("Confirmo a retirada dos itens acima")
+        
+        if st.button("🚀 FINALIZAR REGISTRO", disabled=not assinatura, type="primary"):
             try:
-                # Salva o novo nome na tabela "colaboradores"
-                supabase.table("colaboradores").insert({"nome": novo_nome}).execute()
-                st.success("✅ Cadastro realizado! Atualize a página (F5) para registrar sua refeição.")
+                cod = str(uuid.uuid4())[:8].upper()
+                dt, hr = datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%H:%M:%S")
+                
+                for item in st.session_state.cesta:
+                    supabase.table("registros").insert({
+                        "data": dt, "hora": hr, "colaborador": nome_selecionado,
+                        "tipo": item['tipo'], "litros": item['detalhe'], "codigo_auditoria": cod
+                    }).execute()
+                
+                st.success(f"Registrado! Cód: {cod}")
+                st.session_state.cesta = []
                 st.balloons()
             except Exception as e:
-                st.error(f"Erro ao cadastrar: {e}")
-
-# ==========================================
-# FLUXO B: RETIRADA DE REFEIÇÃO (Para quem já tem nome na lista)
-# ==========================================
-elif nome_selecionado:
-    
-    # Etapa 1: Escolher o Item
-    if 'item_selecionado' not in st.session_state:
-        st.write(f"### Olá, **{nome_selecionado}**! O que vai retirar?")
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            if st.button("☕\nCAFÉ", use_container_width=True): st.session_state.item_selecionado = "CAFÉ"
-        with col2:
-            if st.button("🍵\nCHÁ", use_container_width=True): st.session_state.item_selecionado = "CHÁ"
-        with col3:
-            if st.button("🍱\nMARMITA", use_container_width=True): st.session_state.item_selecionado = "MARMITA"
-        with col4:
-            if st.button("🍽️\nALMOÇO", use_container_width=True): st.session_state.item_selecionado = "ALMOÇO"
-
-    # Etapa 2: Confirmação e Assinatura
-    else:
-        item = st.session_state.item_selecionado
-        
-        st.warning("⚠️ **VERIFIQUE SEU PEDIDO ANTES DE CONFIRMAR**")
-        st.write(f"**Colaborador:** {nome_selecionado}")
-        st.write(f"**Item selecionado:** {item}")
-        
-        volume = "N/A"
-        if item in ["CAFÉ", "CHÁ"]:
-            volume = st.radio("Selecione os litros:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L"], horizontal=True)
-
-        st.markdown("---")
-        
-        assinatura = st.checkbox("Declaro que estou retirando este item (Assinatura Eletrônica)")
-        
-        c_confirma, c_cancela = st.columns(2)
-        
-        with c_cancela:
-            if st.button("❌ CANCELAR", use_container_width=True):
-                del st.session_state.item_selecionado
-                st.rerun()
-
-        with c_confirma:
-            if st.button("✅ CONFIRMAR E REGISTRAR", use_container_width=True, disabled=not assinatura):
-                try:
-                    codigo_auditoria = str(uuid.uuid4())[:8].upper()
-                    
-                    novo_registro = {
-                        "data": datetime.now().strftime("%d/%m/%Y"),
-                        "hora": datetime.now().strftime("%H:%M:%S"),
-                        "colaborador": nome_selecionado,
-                        "tipo": item,
-                        "litros": volume,
-                        "codigo_auditoria": codigo_auditoria
-                    }
-                    
-                    # Salva o consumo na tabela "registros"
-                    supabase.table("registros").insert(novo_registro).execute()
-                    
-                    st.success(f"Registrado com sucesso! Cód. Auditoria: {codigo_auditoria}")
-                    del st.session_state.item_selecionado
-                    st.balloons()
-                    
-                except Exception as e:
-                    st.error(f"Erro técnico ao salvar: {e}")
+                st.error(f"Erro: {e}")
