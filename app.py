@@ -64,26 +64,48 @@ nomes = buscar_nomes()
 nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes, index=None)
 
 # ==========================================
-# FLUXO 1: NOVO CADASTRO (Corrigido)
+# FLUXO 1: NOVO CADASTRO (Aprimorado)
 # ==========================================
 if nome_selecionado == "➕ NOVO CADASTRO...":
     st.info("📝 Preencha seus dados para inclusão no sistema.")
-    novo_nome = st.text_input("Nome Completo:").strip().upper()
+    
+    # Novos campos de entrada
+    novo_nome = st.text_input("Nome Completo (Obrigatório):").strip().upper()
+    nova_empresa = st.text_input("Empresa (Obrigatório - Ex: AURA, APOENA, TERCEIRIZADA):").strip().upper()
+    nova_matricula = st.text_input("Matrícula (Opcional):").strip().upper()
     
     if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
-        if novo_nome == "":
-            st.error("Digite um nome válido.")
+        
+        # VALIDAÇÃO 1: Exige pelo menos duas palavras no nome (Nome + Sobrenome)
+        if len(novo_nome.split()) < 2:
+            st.error("⚠️ Por favor, digite seu Nome e Sobrenome.")
+            
+        # VALIDAÇÃO 2: Empresa não pode ficar em branco
+        elif nova_empresa == "":
+            st.error("⚠️ O campo Empresa é obrigatório.")
+            
+        # VALIDAÇÃO 3: Evita duplicidade de nomes
         elif novo_nome in nomes:
-            st.warning("Este nome já existe na lista.")
+            st.warning("⚠️ Este nome já existe na lista. Por favor, retorne e selecione-o.")
+            
+        # Se passar em todas as validações, salva no banco!
         else:
             try:
-                supabase.table("colaboradores").insert({"nome": novo_nome}).execute()
+                # Se a matrícula estiver vazia, salvamos como "N/A" (Não se Aplica)
+                matricula_final = nova_matricula if nova_matricula != "" else "N/A"
+                
+                dados_colaborador = {
+                    "nome": novo_nome,
+                    "empresa": nova_empresa,
+                    "matricula": matricula_final
+                }
+                
+                supabase.table("colaboradores").insert(dados_colaborador).execute()
                 st.success("✅ Cadastro realizado com sucesso!")
-                # O comando abaixo FORÇA a tela a recarregar para mostrar o nome novo na lista
-                st.rerun() 
+                st.rerun() # Recarrega a tela para atualizar a lista
+                
             except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
-
+                st.error(f"Erro ao salvar no banco de dados: {e}")
 # ==========================================
 # FLUXO 2: SELEÇÃO E CONFIRMAÇÃO (Totem Simplificado)
 # ==========================================
