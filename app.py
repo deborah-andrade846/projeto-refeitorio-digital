@@ -47,15 +47,18 @@ if nome_selecionado:
 
     if registro_tipo:
         try:
-            # 1. DIGITE AQUI O NOME DA ABA QUE ESTÁ LÁ NO RODAPÉ DA PLANILHA
-            nome_aba = "datetime.now().strftime("%B_%Y")" 
+            # CORREÇÃO AQUI: Sem aspas externas para o comando funcionar
+            nome_aba = datetime.now().strftime("%B_%Y") 
 
             try:
-                # Tentamos ler a aba. Se der erro (aba vazia), ele cria o cabeçalho
+                # O Python vai procurar a aba do mês atual (ex: April_2026)
                 df_existente = conn.read(worksheet=nome_aba)
             except:
+                # Se a aba do mês ainda não existir, ele entende que precisa começar uma nova
                 df_existente = pd.DataFrame(columns=["DATA", "HORA", "COLABORADOR", "TIPO", "LITROS"])
 
+            # ... resto do código de criação do novo_dado ...
+            
             novo_dado = pd.DataFrame([{
                 "DATA": datetime.now().strftime("%d/%m/%Y"),
                 "HORA": datetime.now().strftime("%H:%M:%S"),
@@ -64,19 +67,19 @@ if nome_selecionado:
                 "LITROS": volume
             }])
 
-            # Limpa linhas vazias que o Google Sheets às vezes traz
-            df_existente = df_existente.dropna(how='all')
-
             df_final = pd.concat([df_existente, novo_dado], ignore_index=True)
             
-            # 2. AQUI TAMBÉM PRECISA DO NOME DA ABA
+            # ATENÇÃO: Aqui também usamos a variável nome_aba
             conn.update(worksheet=nome_aba, data=df_final) 
             
-            st.success("✅ Registrado com sucesso!")
+            st.success(f"✅ Registrado na aba: {nome_aba}")
             st.balloons()
-            # Limpa o estado para o próximo colega usar
+            
             if 'tipo' in st.session_state:
                 del st.session_state.tipo
+                
+        except Exception as e:
+            st.error(f"Erro: Verifique se a planilha tem a aba '{nome_aba}' ou se está como Editor.")
                 
         except Exception as e:
             st.error(f"Erro técnico: {e}")
