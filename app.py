@@ -1,10 +1,10 @@
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime
-import uuid # Biblioteca para gerar um código de rastreio único
+import uuid
 
-# 1. CONFIGURAÇÃO VISUAL E SUPABASE (Mantenha sua conexão igual)
-st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
+# 1. CONFIGURAÇÃO VISUAL E CONEXÃO
+st.set_page_config(page_title="Totem Refeitório", layout="centered")
 
 @st.cache_resource
 def init_connection():
@@ -15,18 +15,54 @@ def init_connection():
 try:
     supabase: Client = init_connection()
 except Exception as e:
-    st.error("Erro ao conectar no banco de dados.")
+    st.error("Erro de conexão com o banco.")
 
 st.title("🚀 Registro Digital - Refeitório")
 st.markdown("---")
 
-# 2. INTERFACE DE IDENTIFICAÇÃO
-lista_nomes = ["DÉBORAH SILVA", "EMANOEL SANTOS", "JOÃO PEDRO", "MARIA SOUZA", "OUTRO..."]
-nome_selecionado = st.selectbox("NOME DO COLABORADOR:", lista_nomes, index=None)
+# 2. BUSCANDO A LISTA DE NOMES DO BANCO DE DADOS
+# Essa função vai no Supabase e traz todos os nomes cadastrados
+def buscar_nomes():
+    try:
+        resposta = supabase.table("colaboradores").select("nome").execute()
+        lista = [linha["nome"] for linha in resposta.data]
+        return sorted(lista) # Coloca em ordem alfabética
+    except:
+        return []
 
-if nome_selecionado:
+lista_banco = buscar_nomes()
+# Adicionamos a opção de "Novo Cadastro" no topo da lista
+opcoes_dropdown = ["➕ NOVO CADASTRO..."] + lista_banco
+
+nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", opcoes_dropdown, index=None, placeholder="Clique para buscar seu nome...")
+
+# ==========================================
+# FLUXO A: TELA DE NOVO CADASTRO
+# ==========================================
+if nome_selecionado == "➕ NOVO CADASTRO...":
+    st.info("📝 **Primeiro Acesso:** Preencha seus dados para ser incluído no sistema.")
+    novo_nome = st.text_input("Digite seu Nome Completo:").strip().upper()
     
-    # Se ainda não escolheu o item, mostra os botões principais
+    if st.button("💾 SALVAR MEU CADASTRO", use_container_width=True):
+        if novo_nome == "":
+            st.error("Por favor, digite um nome válido.")
+        elif novo_nome in lista_banco:
+            st.warning("Este nome já consta no sistema! Selecione-o na lista acima.")
+        else:
+            try:
+                # Salva o novo nome na tabela "colaboradores"
+                supabase.table("colaboradores").insert({"nome": novo_nome}).execute()
+                st.success("✅ Cadastro realizado! Atualize a página (F5) para registrar sua refeição.")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Erro ao cadastrar: {e}")
+
+# ==========================================
+# FLUXO B: RETIRADA DE REFEIÇÃO (Para quem já tem nome na lista)
+# ==========================================
+elif nome_selecionado:
+    
+    # Etapa 1: Escolher o Item
     if 'item_selecionado' not in st.session_state:
         st.write(f"### Olá, **{nome_selecionado}**! O que vai retirar?")
         col1, col2, col3, col4 = st.columns(4)
@@ -40,7 +76,7 @@ if nome_selecionado:
         with col4:
             if st.button("🍽️\nALMOÇO", use_container_width=True): st.session_state.item_selecionado = "ALMOÇO"
 
-    # 3. TELA DE CONFIRMAÇÃO E AUDITORIA (Evita erros)
+    # Etapa 2: Confirmação e Assinatura
     else:
         item = st.session_state.item_selecionado
         
@@ -48,29 +84,25 @@ if nome_selecionado:
         st.write(f"**Colaborador:** {nome_selecionado}")
         st.write(f"**Item selecionado:** {item}")
         
-        # Logica de litros para bebidas
         volume = "N/A"
         if item in ["CAFÉ", "CHÁ"]:
             volume = st.radio("Selecione os litros:", ["0.5 L", "1.0 L", "1.5 L", "2.0 L"], horizontal=True)
 
         st.markdown("---")
         
-        # ASSINATURA ELETRÔNICA (Para Auditoria)
         assinatura = st.checkbox("Declaro que estou retirando este item (Assinatura Eletrônica)")
         
-        # Botões lado a lado para Confirmar ou Cancelar
         c_confirma, c_cancela = st.columns(2)
         
         with c_cancela:
-            if st.button("❌ CANCELAR E VOLTAR", use_container_width=True):
+            if st.button("❌ CANCELAR", use_container_width=True):
                 del st.session_state.item_selecionado
-                st.rerun() # Atualiza a tela
+                st.rerun()
 
         with c_confirma:
-            # O botão só funciona se a pessoa marcar a caixinha de assinatura
             if st.button("✅ CONFIRMAR E REGISTRAR", use_container_width=True, disabled=not assinatura):
                 try:
-                    codigo_auditoria = str(uuid.uuid4())[:8].upper() # Gera um código único (ex: A4B2C9)
+                    codigo_auditoria = str(uuid.uuid4())[:8].upper()
                     
                     novo_registro = {
                         "data": datetime.now().strftime("%d/%m/%Y"),
@@ -78,9 +110,10 @@ if nome_selecionado:
                         "colaborador": nome_selecionado,
                         "tipo": item,
                         "litros": volume,
-                        "codigo_auditoria": codigo_auditoria # Salva o código rastreável
+                        "codigo_auditoria": codigo_auditoria
                     }
                     
+                    # Salva o consumo na tabela "registros"
                     supabase.table("registros").insert(novo_registro).execute()
                     
                     st.success(f"Registrado com sucesso! Cód. Auditoria: {codigo_auditoria}")
@@ -88,4 +121,4 @@ if nome_selecionado:
                     st.balloons()
                     
                 except Exception as e:
-                    st.error(f"Erro ao salvar: {e}")
+                    st.error(f"Erro técnico ao salvar: {e}")
