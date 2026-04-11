@@ -158,15 +158,18 @@ elif nome_selecionado:
         if item in ["CAFÉ", "CHÁ"]:
             st.write("**Quantas garrafas de cada tamanho você está levando?**")
             
-            # Contadores lado a lado
-            c1, c2, c3, c4, c5, c6, c7 = st.columns(7)
+            # LINHA 1 (4 tamanhos)
+            c1, c2, c3, c4 = st.columns(4)
             with c1: qtd_05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
             with c2: qtd_10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
             with c3: qtd_15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-            with c4: qtd_15 = st.number_input("Garrafa 1.8 L", 0, 10, 0)    
+            with c4: qtd_18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
+
+            # LINHA 2 (3 tamanhos)
+            c5, c6, c7 = st.columns(3)
             with c5: qtd_20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-            with c6: qtd_20 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-            with c7: qtd_20 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
+            with c6: qtd_25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
+            with c7: qtd_35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
             
             st.write("**Outro tamanho de garrafa?**")
             c_out1, c_out2 = st.columns(2)
@@ -177,7 +180,10 @@ elif nome_selecionado:
             for _ in range(qtd_05): lista_para_salvar.append("0.5 L")
             for _ in range(qtd_10): lista_para_salvar.append("1.0 L")
             for _ in range(qtd_15): lista_para_salvar.append("1.5 L")
+            for _ in range(qtd_18): lista_para_salvar.append("1.8 L") # Novo
             for _ in range(qtd_20): lista_para_salvar.append("2.0 L")
+            for _ in range(qtd_25): lista_para_salvar.append("2.5 L") # Novo
+            for _ in range(qtd_35): lista_para_salvar.append("3.5 L") # Novo
             for _ in range(qtd_outro): 
                 if litro_outro > 0: lista_para_salvar.append(f"{litro_outro} L")
                 
