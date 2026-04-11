@@ -238,6 +238,62 @@ elif nome_selecionado:
                     st.success(f"✅ Registrado com sucesso! Cód: {cod_auditoria}")
                     st.session_state.item_selecionado = None
                     st.balloons()
-                    
+# ==========================================
+# ÁREA DE MEDIÇÃO E AUDITORIA (PORTAL DO FORNECEDOR)
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.subheader("Área Administrativa")
+acesso_adm = st.sidebar.checkbox("Acessar Portal de Medição")
+
+if acesso_adm:
+    # Senha simples para o fornecedor (ex: Aura@2026)
+    senha = st.sidebar.text_input("Digite a Senha de Acesso:", type="password")
+    
+    if senha == "SuaSenhaAqui": # Escolha uma senha para passar para eles
+        st.markdown("---")
+        st.header("📊 Portal de Medição - Terceiros")
+        st.write("Consulte aqui os registros para conferência da fatura mensal.")
+
+        try:
+            # Busca todos os dados da tabela 'registros'
+            res = supabase.table("registros").select("*").execute()
+            df_auditoria = pd.DataFrame(res.data)
+
+            if not df_auditoria.empty:
+                # Reorganiza as colunas para ficar bonito
+                colunas_ordem = ["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]
+                df_auditoria = df_auditoria[colunas_ordem]
+
+                # 1. Filtro por Data (Para eles escolherem o mês da medição)
+                st.write("### Filtrar Dados")
+                lista_datas = sorted(df_auditoria["data"].unique(), reverse=True)
+                data_filtro = st.multiselect("Selecione as Datas:", lista_datas, default=lista_datas[:5])
+                
+                df_filtrado = df_auditoria[df_auditoria["data"].isin(data_filtro)]
+
+                # 2. Exibição da Tabela (Apenas Visualização)
+                st.dataframe(df_filtrado, use_container_width=True)
+
+                # 3. BOTÃO DE DOWNLOAD (A "mão na roda" para o fornecedor)
+                # Converte o DataFrame para CSV para eles baixarem
+                csv = df_filtrado.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 BAIXAR DADOS PARA EXCEL (CSV)",
+                    data=csv,
+                    file_name=f"medicao_refeitorio_{datetime.now().strftime('%d_%m_%Y')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+                
+                st.info("💡 Como usar: Clique no botão acima para baixar. No Excel, use 'Dados > Obter Dados de Texto/CSV' para organizar as colunas.")
+
+            else:
+                st.warning("Ainda não há registros no banco de dados.")
+
+        except Exception as e:
+            st.error(f"Erro ao carregar dados: {e}")
+    
+    elif senha != "":
+        st.sidebar.error("Senha incorreta!")                    
                 except Exception as e:
                     st.error(f"Erro ao salvar: {e}")
