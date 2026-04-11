@@ -3,7 +3,7 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 import pandas as pd
 import uuid
-import io
+import io  # <-- ESTE É O QUE RESOLVE O ERRO DA LINHA 142
 
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
