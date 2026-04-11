@@ -3,6 +3,7 @@ from supabase import create_client, Client
 from datetime import datetime, timedelta
 import pandas as pd
 import uuid
+import io
 
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
@@ -138,18 +139,46 @@ elif nome_selecionado:
                     st.balloons()
                 except Exception as e: st.error(f"Erro: {e}")
 
-# ==========================================
-# PORTAL DE MEDIÇÃO (ADMIN)
+==========================================
+# PORTAL DE MEDIÇÃO (ADMIN) - VERSÃO EXCEL
 # ==========================================
 st.sidebar.markdown("---")
 if st.sidebar.checkbox("Portal de Medição"):
     pw = st.sidebar.text_input("Senha:", type="password")
     if pw == "Aura@2026":
-        st.header("📊 Medição")
+        st.header("📊 Medição Corporativa")
         try:
             res_adm = supabase.table("registros").select("*").execute()
             df = pd.DataFrame(res_adm.data)
+            
             if not df.empty:
-                st.dataframe(df[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]], use_container_width=True)
-                st.download_button("📥 Baixar CSV", df.to_csv(index=False).encode('utf-8'), "medicao.csv", "text/csv")
-        except Exception as e: st.error(f"Erro ao carregar: {e}")
+                # Organiza as colunas
+                df = df[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
+                
+                # Visualização na tela
+                st.write("### Registros Identificados")
+                st.dataframe(df, use_container_width=True)
+
+                # --- MÁGICA PARA GERAR EXCEL (.XLSX) ---
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='Medicao_Refeitorio')
+                
+                excel_data = output.getvalue()
+
+                st.download_button(
+                    label="📥 BAIXAR PLANILHA FORMATADA (EXCEL)",
+                    data=excel_data,
+                    file_name=f"Medicao_Aura_Apoena_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+                st.success("Planilha pronta para análise! O arquivo já virá com as colunas separadas.")
+                
+        except Exception as e: 
+            st.error(f"Erro ao carregar ou converter dados: {e}")
+            
+    elif senha != "": 
+        st.sidebar.error("Senha incorreta")
