@@ -1,6 +1,7 @@
 import streamlit as st
 from supabase import create_client, Client
 from datetime import datetime, timedelta
+import pandas as pd
 import uuid
 
 # 1. CONFIGURAÇÃO E CONEXÃO
@@ -18,6 +19,7 @@ except Exception as e:
     st.error("Erro de conexão com o banco de dados.")
 
 # --- FUNÇÕES DE APOIO ---
+
 def buscar_nomes():
     try:
         res = supabase.table("colaboradores").select("nome").execute()
@@ -26,7 +28,6 @@ def buscar_nomes():
         return []
 
 def verificar_trava_tempo(nome, tipo_refeicao):
-    """Verifica se o colaborador já pegou esta refeição nas últimas 4h"""
     if tipo_refeicao not in ["ALMOÇO", "JANTAR"]:
         return True, ""
     
@@ -51,8 +52,7 @@ def verificar_trava_tempo(nome, tipo_refeicao):
         pass
     return True, ""
 
-# --- INICIALIZAÇÃO DA MEMÓRIA ---
-# 'item_selecionado' guarda o que a pessoa clicou para focar a tela
+# --- INICIALIZAÇÃO DE ESTADO ---
 if 'item_selecionado' not in st.session_state:
     st.session_state.item_selecionado = None
 
@@ -60,238 +60,135 @@ if 'item_selecionado' not in st.session_state:
 st.title("🚀 Registro Digital - Refeitório")
 st.markdown("---")
 
-nomes = buscar_nomes()
-nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes, index=None)
+nomes_cadastrados = buscar_nomes()
+nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes_cadastrados, index=None)
 
 # ==========================================
-# FLUXO 1: NOVO CADASTRO (Aprimorado)
+# FLUXO 1: NOVO CADASTRO
 # ==========================================
 if nome_selecionado == "➕ NOVO CADASTRO...":
-    st.info("📝 Preencha seus dados para inclusão no sistema.")
+    st.info("📝 Preencha os dados para inclusão no sistema.")
     
-    # Novos campos de entrada
     novo_nome = st.text_input("Nome Completo (Obrigatório):").strip().upper()
-    nova_empresa = st.text_input("Empresa (Obrigatório - Ex: AURA, SERT, G3):").strip().upper()
-    nova_matricula = st.text_input("Matrícula:").strip().upper()
+    nova_empresa = st.text_input("Empresa (Obrigatório):").strip().upper()
+    nova_matricula = st.text_input("Matrícula (Opcional):").strip().upper()
     
     if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
-        
-        # VALIDAÇÃO 1: Exige pelo menos duas palavras no nome (Nome + Sobrenome)
         if len(novo_nome.split()) < 2:
-            st.error("⚠️ Por favor, digite seu Nome e Sobrenome.")
-            
-        # VALIDAÇÃO 2: Empresa não pode ficar em branco
+            st.error("⚠️ Digite seu Nome e Sobrenome.")
         elif nova_empresa == "":
             st.error("⚠️ O campo Empresa é obrigatório.")
-            
-        # VALIDAÇÃO 3: Evita duplicidade de nomes
-        elif novo_nome in nomes:
-            st.warning("⚠️ Este nome já existe na lista. Por favor, retorne e selecione-o.")
-            
-        # Se passar em todas as validações, salva no banco!
+        elif novo_nome in nomes_cadastrados:
+            st.warning("⚠️ Este nome já existe na lista.")
         else:
             try:
-                # Se a matrícula estiver vazia, salvamos como "N/A" (Não se Aplica)
-                matricula_final = nova_matricula if nova_matricula != "" else "N/A"
-                
-                dados_colaborador = {
-                    "nome": novo_nome,
-                    "empresa": nova_empresa,
-                    "matricula": matricula_final
-                }
-                
-                supabase.table("colaboradores").insert(dados_colaborador).execute()
-                st.success("✅ Cadastro realizado com sucesso!")
-                st.rerun() # Recarrega a tela para atualizar a lista
-                
+                mat_final = nova_matricula if nova_matricula != "" else "N/A"
+                supabase.table("colaboradores").insert({
+                    "nome": novo_nome, "empresa": nova_empresa, "matricula": mat_final
+                }).execute()
+                st.success("✅ Cadastro realizado!")
+                st.rerun()
             except Exception as e:
-                st.error(f"Erro ao salvar no banco de dados: {e}")
+                st.error(f"Erro ao salvar: {e}")
+
 # ==========================================
-# FLUXO 2: SELEÇÃO E CONFIRMAÇÃO (Totem Simplificado)
+# FLUXO 2: SELEÇÃO E REGISTRO
 # ==========================================
 elif nome_selecionado:
     
-    # TELA A: MENU PRINCIPAL
     if not st.session_state.item_selecionado:
         st.write(f"### Olá, **{nome_selecionado}**!")
         st.write("**O que você vai retirar agora?**")
         
         col1, col2, col3, col4, col5 = st.columns(5)
-        
         with col1:
-            if st.button("☕\nCAFÉ"): 
-                st.session_state.item_selecionado = "CAFÉ"
-                st.rerun()
+            if st.button("☕\nCAFÉ"): st.session_state.item_selecionado = "CAFÉ"; st.rerun()
         with col2:
-            if st.button("🍵\nCHÁ"): 
-                st.session_state.item_selecionado = "CHÁ"
-                st.rerun()
+            if st.button("🍵\nCHÁ"): st.session_state.item_selecionado = "CHÁ"; st.rerun()
         with col3:
-            if st.button("🍱\nMARMITA"): 
-                st.session_state.item_selecionado = "MARMITA"
-                st.rerun()
+            if st.button("🍱\nMARMITA"): st.session_state.item_selecionado = "MARMITA"; st.rerun()
         with col4:
-            pode_almoco, msg_almoco = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
-            if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): 
-                st.session_state.item_selecionado = "ALMOÇO"
-                st.rerun()
-            if not pode_almoco: st.caption(msg_almoco)
+            pode_almoco, msg_a = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
+            if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): st.session_state.item_selecionado = "ALMOÇO"; st.rerun()
+            if not pode_almoco: st.caption(msg_a)
         with col5:
-            pode_jantar, msg_jantar = verificar_trava_tempo(nome_selecionado, "JANTAR")
-            if st.button("🌙\nJANTAR", disabled=not pode_jantar): 
-                st.session_state.item_selecionado = "JANTAR"
-                st.rerun()
-            if not pode_jantar: st.caption(msg_jantar)
+            pode_jantar, msg_j = verificar_trava_tempo(nome_selecionado, "JANTAR")
+            if st.button("🌙\nJANTAR", disabled=not pode_jantar): st.session_state.item_selecionado = "JANTAR"; st.rerun()
+            if not pode_jantar: st.caption(msg_j)
 
-    # TELA B: DETALHES E CONFIRMAÇÃO (Com Múltiplas Quantidades)
     else:
         item = st.session_state.item_selecionado
+        st.warning(f"⚠️ **Confirmando Registro: {item}**")
         
-        st.warning("⚠️ **Confirme as quantidades do seu registro:**")
-        st.write(f"**Colaborador:** {nome_selecionado}")
-        st.write(f"**Item selecionado:** {item}")
+        lista_para_salvar = []
         
-        # Essa lista vai guardar as "linhas" que vão para o banco de dados
-        lista_para_salvar = [] 
-        
-        # --- LÓGICA DE BEBIDAS (Múltiplas garrafas e tamanhos) ---
         if item in ["CAFÉ", "CHÁ"]:
-            st.write("**Quantas garrafas de cada tamanho você está levando?**")
+            st.write("Selecione a quantidade de garrafas:")
+            l1, l2, l3, l4 = st.columns(4)
+            with l1: q05 = st.number_input("0.5 L", 0, 10, 0); [lista_para_salvar.append("0.5 L") for _ in range(q05)]
+            with l2: q10 = st.number_input("1.0 L", 0, 10, 0); [lista_para_salvar.append("1.0 L") for _ in range(q10)]
+            with l3: q15 = st.number_input("1.5 L", 0, 10, 0); [lista_para_salvar.append("1.5 L") for _ in range(q15)]
+            with l4: q18 = st.number_input("1.8 L", 0, 10, 0); [lista_para_salvar.append("1.8 L") for _ in range(q18)]
             
-            # LINHA 1 (4 tamanhos)
-            c1, c2, c3, c4 = st.columns(4)
-            with c1: qtd_05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
-            with c2: qtd_10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
-            with c3: qtd_15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-            with c4: qtd_18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
-
-            # LINHA 2 (3 tamanhos)
-            c5, c6, c7 = st.columns(3)
-            with c5: qtd_20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-            with c6: qtd_25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-            with c7: qtd_35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
+            l5, l6, l7 = st.columns(3)
+            with l5: q20 = st.number_input("2.0 L", 0, 10, 0); [lista_para_salvar.append("2.0 L") for _ in range(q20)]
+            with l6: q25 = st.number_input("2.5 L", 0, 10, 0); [lista_para_salvar.append("2.5 L") for _ in range(q25)]
+            with l7: q35 = st.number_input("3.5 L", 0, 10, 0); [lista_para_salvar.append("3.5 L") for _ in range(q35)]
             
-            st.write("**Outro tamanho de garrafa?**")
-            c_out1, c_out2 = st.columns(2)
-            with c_out1: litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
-            with c_out2: qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
+            st.write("Outro tamanho?")
+            co1, co2 = st.columns(2)
+            with co1: l_out = st.number_input("Litragem:", 0.0, 10.0, 0.0, step=0.1)
+            with co2: q_out = st.number_input("Qtd:", 0, 10, 0); [lista_para_salvar.append(f"{l_out} L") for _ in range(q_out) if l_out > 0]
 
-            # O sistema gera uma linha no banco para CADA garrafa selecionada
-            for _ in range(qtd_05): lista_para_salvar.append("0.5 L")
-            for _ in range(qtd_10): lista_para_salvar.append("1.0 L")
-            for _ in range(qtd_15): lista_para_salvar.append("1.5 L")
-            for _ in range(qtd_18): lista_para_salvar.append("1.8 L") # Novo
-            for _ in range(qtd_20): lista_para_salvar.append("2.0 L")
-            for _ in range(qtd_25): lista_para_salvar.append("2.5 L") # Novo
-            for _ in range(qtd_35): lista_para_salvar.append("3.5 L") # Novo
-            for _ in range(qtd_outro): 
-                if litro_outro > 0: lista_para_salvar.append(f"{litro_outro} L")
-                
-        # --- LÓGICA DE MARMITA (Múltiplas quantidades) ---
         elif item == "MARMITA":
-            qtd_marmitas = st.number_input("Quantidade de Marmitas:", min_value=1, max_value=10, step=1)
-            for _ in range(qtd_marmitas):
-                lista_para_salvar.append("1 UN") # Gera várias linhas de 1 UN
-            
-        # --- LÓGICA DE ALMOÇO / JANTAR (Travado em 1 unidade) ---
-        else: 
-            st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
+            qtd_m = st.number_input("Quantidade:", 1, 10, 1)
+            [lista_para_salvar.append("1 UN") for _ in range(qtd_m)]
+        else:
+            st.info("Limite de 1 unidade por turno.")
             lista_para_salvar.append("1 UN")
 
         st.markdown("---")
+        total = len(lista_para_salvar)
+        assinatura = st.checkbox(f"Assino a retirada de {total} item(ns)", disabled=(total == 0))
         
-        # VALIDAÇÃO: Impede envio de carrinho vazio (ex: pessoa marcou 0 garrafas)
-        total_itens = len(lista_para_salvar)
-        if total_itens == 0:
-            st.error("⚠️ Adicione a quantidade de garrafas antes de confirmar.")
-            
-        assinatura = st.checkbox(f"Declaro que estou retirando {total_itens} item(ns).", disabled=(total_itens == 0))
-        
-        # Botões de Ação
-        c_cancela, c_confirma = st.columns(2)
-        
-        with c_cancela:
-            if st.button("❌ CANCELAR E VOLTAR", use_container_width=True):
-                st.session_state.item_selecionado = None 
-                st.rerun()
-
-        with c_confirma:
-            # O botão verde só liga se a pessoa tiver escolhido algo > 0 e assinado
-            if st.button("✅ CONFIRMAR REGISTRO", use_container_width=True, disabled=not assinatura, type="primary"):
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("❌ CANCELAR", use_container_width=True):
+                st.session_state.item_selecionado = None; st.rerun()
+        with c2:
+            if st.button("✅ CONFIRMAR", use_container_width=True, disabled=not assinatura, type="primary"):
                 try:
-                    cod_auditoria = str(uuid.uuid4())[:8].upper()
-                    data_hoje = datetime.now().strftime("%d/%m/%Y")
-                    hora_agora = datetime.now().strftime("%H:%M:%S")
-                    
-                    # Salva CADA item da lista como uma linha independente no Supabase
-                    for litragem in lista_para_salvar:
-                        dados_bd = {
-                            "data": data_hoje,
-                            "hora": hora_agora,
-                            "colaborador": nome_selecionado,
-                            "tipo": item,
-                            "litros": litragem,
-                            "codigo_auditoria": cod_auditoria
-                        }
-                        supabase.table("registros").insert(dados_bd).execute()
-                    
-                    st.success(f"✅ Registrado com sucesso! Cód: {cod_auditoria}")
-                    st.session_state.item_selecionado = None
-                    st.balloons()
+                    cod = str(uuid.uuid4())[:8].upper()
+                    dt, hr = datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%H:%M:%S")
+                    for lit in lista_para_salvar:
+                        supabase.table("registros").insert({
+                            "data": dt, "hora": hr, "colaborador": nome_selecionado,
+                            "tipo": item, "litros": lit, "codigo_auditoria": cod
+                        }).execute()
+                    st.success(f"✅ Registrado! Cód: {cod}")
+                    st.session_state.item_selecionado = None; st.balloons()
+                except Exception as e: st.error(f"Erro: {e}")
+
 # ==========================================
-# ÁREA DE MEDIÇÃO E AUDITORIA (PORTAL DO FORNECEDOR)
+# PORTAL DE MEDIÇÃO (BARRA LATERAL)
 # ==========================================
 st.sidebar.markdown("---")
-st.sidebar.subheader("Área Administrativa")
-acesso_adm = st.sidebar.checkbox("Acessar Portal de Medição")
-
-if acesso_adm:
-    # Senha simples para o fornecedor (ex: Aura@2026)
-    senha = st.sidebar.text_input("Digite a Senha de Acesso:", type="password")
-    
-    if senha == "SuaSenhaAqui": # Escolha uma senha para passar para eles
+st.sidebar.subheader("🔒 Administração")
+if st.sidebar.checkbox("Portal de Medição"):
+    senha = st.sidebar.text_input("Senha:", type="password")
+    if senha == "Aura@2026": # Escolha sua senha
         st.markdown("---")
-        st.header("📊 Portal de Medição - Terceiros")
-        st.write("Consulte aqui os registros para conferência da fatura mensal.")
-
+        st.header("📊 Dados de Medição")
         try:
-            # Busca todos os dados da tabela 'registros'
-            res = supabase.table("registros").select("*").execute()
-            df_auditoria = pd.DataFrame(res.data)
-
-            if not df_auditoria.empty:
-                # Reorganiza as colunas para ficar bonito
-                colunas_ordem = ["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]
-                df_auditoria = df_auditoria[colunas_ordem]
-
-                # 1. Filtro por Data (Para eles escolherem o mês da medição)
-                st.write("### Filtrar Dados")
-                lista_datas = sorted(df_auditoria["data"].unique(), reverse=True)
-                data_filtro = st.multiselect("Selecione as Datas:", lista_datas, default=lista_datas[:5])
-                
-                df_filtrado = df_auditoria[df_auditoria["data"].isin(data_filtro)]
-
-                # 2. Exibição da Tabela (Apenas Visualização)
-                st.dataframe(df_filtrado, use_container_width=True)
-
-                # 3. BOTÃO DE DOWNLOAD (A "mão na roda" para o fornecedor)
-                # Converte o DataFrame para CSV para eles baixarem
-                csv = df_filtrado.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 BAIXAR DADOS PARA EXCEL (CSV)",
-                    data=csv,
-                    file_name=f"medicao_refeitorio_{datetime.now().strftime('%d_%m_%Y')}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-                
-                st.info("💡 Como usar: Clique no botão acima para baixar. No Excel, use 'Dados > Obter Dados de Texto/CSV' para organizar as colunas.")
-
-            else:
-                st.warning("Ainda não há registros no banco de dados.")
-
-        except Exception as e:
-            st.error(f"Erro ao carregar dados: {e}")
+            adm_res = supabase.table("registros").select("*").execute()
+            df = pd.DataFrame(adm_res.data)
+            if not df.empty:
+                df = df[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
+                st.dataframe(df, use_container_width=True)
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 BAIXAR CSV", csv, "medicao.csv", "text/csv", use_container_width=True)
+        except Exception as e: st.error(f"Erro: {e}")
+    elif senha != "": st.sidebar.error("Incorreta")
     
     elif senha != "":
         st.sidebar.error("Senha incorreta!")                    
