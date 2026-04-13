@@ -4,9 +4,21 @@ from datetime import datetime, timedelta
 import pandas as pd
 import uuid
 import io
+import time  # <-- Adicionado para controlar o tempo do Reset
 
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
+
+# --- OCULTAR MENU E RODAPÉ DO STREAMLIT (Sua Privacidade!) ---
+esconder_menu = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+    """
+st.markdown(esconder_menu, unsafe_allow_html=True)
+# -------------------------------------------------------------
 
 # 2. CONEXÃO COM O BANCO DE DADOS
 @st.cache_resource
@@ -23,300 +35,243 @@ supabase = init_connection()
 
 # --- FUNÇÕES DE APOIO ---
 
-def hora_local():
-    """
-    Força o sistema a utilizar o fuso horário de Mato Grosso (UTC-4),
-    ignorando o relógio global (UTC) do servidor do Streamlit.
-    """
-    return datetime.utcnow() - timedelta(hours=4)
-
-def buscar_dados_colaboradores():
+def buscar_nomes():
     try:
-        res = supabase.table("colaboradores").select("nome, senha").execute()
-        return res.data
+        res = supabase.table("colaboradores").select("nome").execute()
+        return sorted([linha["nome"] for linha in res.data])
     except:
         return []
 
-def verificar_regras_refeicao(nome, tipo_refeicao):
+def verificar_trava_tempo(nome, tipo_refeicao):
     if tipo_refeicao not in ["ALMOÇO", "JANTAR"]:
         return True, ""
-    
-    # Utiliza o horário ajustado para MT
-    agora = hora_local()
-    hora_atual = agora.hour
+    agora = datetime.now()
     data_hoje = agora.strftime("%d/%m/%Y")
-    
-    # REGRA 1: Janela de Horário de Funcionamento
-    if tipo_refeicao == "ALMOÇO":
-        if not (10 <= hora_atual < 14):
-            return False, "Fora do horário (10h às 14h)"
-            
-    elif tipo_refeicao == "JANTAR":
-        if hora_atual < 20: 
-            return False, "Fora do horário (20h às 00h)"
-            
-    # REGRA 2: Consumo Único 
     try:
-        res = supabase.table("registros").select("id").eq("colaborador", nome).eq("data", data_hoje).eq("tipo", tipo_refeicao).limit(1).execute()
-        
+        res = supabase.table("registros").select("hora").eq("colaborador", nome).eq("data", data_hoje).eq("tipo", tipo_refeicao).order("hora", desc=True).limit(1).execute()
         if res.data:
-            return False, f"Bloqueado: {tipo_refeicao} já consumido hoje."
+            ultima_h = datetime.strptime(res.data[0]['hora'], "%H:%M:%S")
+            diff = agora - datetime.combine(agora.date(), ultima_h.time())
+            if diff.total_seconds() < 14400: # 4 horas
+                return False, f"Bloqueado: Registro recente de {tipo_refeicao} (< 4h)."
     except:
         pass
-    
     return True, ""
 
 # --- ESTADO DO SISTEMA ---
 if 'item_selecionado' not in st.session_state:
     st.session_state.item_selecionado = None
 
-if 'usuario_autenticado' not in st.session_state:
-    st.session_state.usuario_autenticado = False
+# NOVO: Controle da chave da caixa de identificação para forçar o Reset
+if 'chave_identificacao' not in st.session_state:
+    st.session_state.chave_identificacao = "identificador_inicial"
 
+# --- INTERFACE PRINCIPAL ---
+st.title("🚀 Registro Digital - Refeitório")
+st.markdown("---")
 
-# ==========================================
-# CONTROLE DE NAVEGAÇÃO (BARRA LATERAL)
-# ==========================================
-st.sidebar.markdown("---")
-modo_admin = st.sidebar.checkbox("Acessar Portal de Medição")
-senha_admin_ok = False
+nomes_cadastrados = buscar_nomes()
 
-if modo_admin:
-    pw_admin = st.sidebar.text_input("Senha Admin:", type="password")
-    if pw_admin == "Aura@2026":
-        senha_admin_ok = True
-    elif pw_admin != "":
-        st.sidebar.error("Senha incorreta!")
+# A caixa de seleção agora usa a Chave Dinâmica
+nome_selecionado = st.selectbox(
+    "IDENTIFIQUE-SE:", 
+    ["➕ NOVO CADASTRO..."] + nomes_cadastrados, 
+    index=None,
+    key=st.session_state.chave_identificacao
+)
 
-
-# ==========================================
-# TELA 1: PORTAL DE MEDIÇÃO (ADMINISTRAÇÃO)
-# ==========================================
-if senha_admin_ok:
-    st.title("📊 Portal Administrativo - Medição")
-    st.markdown("---")
+# --- FLUXO 1: NOVO CADASTRO ---
+if nome_selecionado == "➕ NOVO CADASTRO...":
+    st.info("📝 Preencha os dados abaixo:")
+    n_nome = st.text_input("Nome Completo (Mínimo 2 nomes):").strip().upper()
+    n_empresa = st.text_input("Empresa:").strip().upper()
+    n_mat = st.text_input("Matrícula (Opcional):").strip().upper()
     
-    col_i, col_f = st.columns(2)
-    with col_i:
-        d_inicio = st.date_input("Data Início:", hora_local() - timedelta(days=30), format="DD/MM/YYYY")
-    with col_f:
-        d_fim = st.date_input("Data Fim:", hora_local(), format="DD/MM/YYYY")
+    if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
+        if len(n_nome.split()) < 2:
+            st.error("⚠️ Digite o nome completo (Nome e Sobrenome).")
+        elif n_empresa == "":
+            st.error("⚠️ Informe a empresa.")
+        else:
+            try:
+                supabase.table("colaboradores").insert({
+                    "nome": n_nome, "empresa": n_empresa, "matricula": n_mat if n_mat else "N/A"
+                }).execute()
+                st.success("✅ Cadastro realizado!")
+                
+                # Zera a tela após o cadastro também
+                time.sleep(2)
+                st.session_state.chave_identificacao = str(uuid.uuid4())
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Erro ao salvar: {e}")
 
-    if st.button("🔍 CARREGAR DADOS DO PERÍODO", use_container_width=True):
+# ==========================================
+# FLUXO 2: SELEÇÃO E CONFIRMAÇÃO (Totem Simplificado)
+# ==========================================
+elif nome_selecionado:
+    
+    # TELA A: MENU PRINCIPAL
+    if not st.session_state.item_selecionado:
+        st.write(f"### Olá, **{nome_selecionado}**!")
+        st.write("**O que você vai retirar agora?**")
+        
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            if st.button("☕\nCAFÉ"): 
+                st.session_state.item_selecionado = "CAFÉ"
+                st.rerun()
+        with col2:
+            if st.button("🍵\nCHÁ"): 
+                st.session_state.item_selecionado = "CHÁ"
+                st.rerun()
+        with col3:
+            if st.button("🍱\nMARMITA"): 
+                st.session_state.item_selecionado = "MARMITA"
+                st.rerun()
+        with col4:
+            pode_almoco, msg_almoco = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
+            if st.button("🍽️\nALMOÇO", disabled=not pode_almoco): 
+                st.session_state.item_selecionado = "ALMOÇO"
+                st.rerun()
+            if not pode_almoco: st.caption(msg_almoco)
+        with col5:
+            pode_jantar, msg_jantar = verificar_trava_tempo(nome_selecionado, "JANTAR")
+            if st.button("🌙\nJANTAR", disabled=not pode_jantar): 
+                st.session_state.item_selecionado = "JANTAR"
+                st.rerun()
+            if not pode_jantar: st.caption(msg_jantar)
+
+    # TELA B: DETALHES E CONFIRMAÇÃO (Com Múltiplas Quantidades)
+    else:
+        item = st.session_state.item_selecionado
+        
+        st.warning("⚠️ **Confirme as quantidades do seu registro:**")
+        st.write(f"**Colaborador:** {nome_selecionado}")
+        st.write(f"**Item selecionado:** {item}")
+        
+        # Essa lista vai guardar as "linhas" que vão para o banco de dados
+        lista_para_salvar = [] 
+        
+       # --- LÓGICA DE BEBIDAS (Múltiplas garrafas e tamanhos) ---
+        if item in ["CAFÉ", "CHÁ"]:
+            st.write("**Quantas garrafas de cada tamanho você está levando?**")
+            
+            # LINHA 1 (4 tamanhos)
+            c1, c2, c3, c4 = st.columns(4)
+            with c1: qtd_05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
+            with c2: qtd_10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
+            with c3: qtd_15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
+            with c4: qtd_18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
+
+            # LINHA 2 (3 tamanhos)
+            c5, c6, c7 = st.columns(3)
+            with c5: qtd_20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
+            with c6: qtd_25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
+            with c7: qtd_35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
+            
+            st.write("**Outro tamanho de garrafa?**")
+            c_out1, c_out2 = st.columns(2)
+            with c_out1: litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
+            with c_out2: qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
+
+            # O sistema gera uma linha no banco para CADA garrafa selecionada
+            for _ in range(qtd_05): lista_para_salvar.append("0.5 L")
+            for _ in range(qtd_10): lista_para_salvar.append("1.0 L")
+            for _ in range(qtd_15): lista_para_salvar.append("1.5 L")
+            for _ in range(qtd_18): lista_para_salvar.append("1.8 L") # Novo
+            for _ in range(qtd_20): lista_para_salvar.append("2.0 L")
+            for _ in range(qtd_25): lista_para_salvar.append("2.5 L") # Novo
+            for _ in range(qtd_35): lista_para_salvar.append("3.5 L") # Novo
+            for _ in range(qtd_outro): 
+                if litro_outro > 0: lista_para_salvar.append(f"{litro_outro} L")
+                
+        # --- LÓGICA DE MARMITA (Múltiplas quantidades) ---
+        elif item == "MARMITA":
+            qtd_marmitas = st.number_input("Quantidade de Marmitas:", min_value=1, max_value=10, step=1)
+            for _ in range(qtd_marmitas):
+                lista_para_salvar.append("1 UN") # Gera várias linhas de 1 UN
+            
+        # --- LÓGICA DE ALMOÇO / JANTAR (Travado em 1 unidade) ---
+        else: 
+            st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
+            lista_para_salvar.append("1 UN")
+
+        st.markdown("---")
+        
+        # VALIDAÇÃO: Impede envio de carrinho vazio (ex: pessoa marcou 0 garrafas)
+        total_itens = len(lista_para_salvar)
+        if total_itens == 0:
+            st.error("⚠️ Adicione a quantidade de garrafas antes de confirmar.")
+            
+        assinatura = st.checkbox(f"Declaro que estou retirando {total_itens} item(ns).", disabled=(total_itens == 0))
+        
+        # Botões de Ação
+        c_cancela, c_confirma = st.columns(2)
+        
+        with c_cancela:
+            if st.button("❌ CANCELAR E VOLTAR", use_container_width=True):
+                st.session_state.item_selecionado = None 
+                st.rerun()
+
+        with c_confirma:
+            # O botão verde só liga se a pessoa tiver escolhido algo > 0 e assinado
+            if st.button("✅ CONFIRMAR REGISTRO", use_container_width=True, disabled=not assinatura, type="primary"):
+                try:
+                    cod_auditoria = str(uuid.uuid4())[:8].upper()
+                    data_hoje = datetime.now().strftime("%d/%m/%Y")
+                    hora_agora = datetime.now().strftime("%H:%M:%S")
+                    
+                    # Salva CADA item da lista como uma linha independente no Supabase
+                    for litragem in lista_para_salvar:
+                        dados_bd = {
+                            "data": data_hoje,
+                            "hora": hora_agora,
+                            "colaborador": nome_selecionado,
+                            "tipo": item,
+                            "litros": litragem,
+                            "codigo_auditoria": cod_auditoria
+                        }
+                        supabase.table("registros").insert(dados_bd).execute()
+                    
+                    st.success(f"✅ Registrado com sucesso! Cód: {cod_auditoria}")
+                    st.balloons()
+                    
+                    # --- A MÁGICA DO RESET ACONTECE AQUI ---
+                    time.sleep(2.5)  # Dá tempo da pessoa ler a mensagem
+                    st.session_state.item_selecionado = None
+                    st.session_state.chave_identificacao = str(uuid.uuid4()) # Zera o nome selecionado
+                    st.rerun()       # Atualiza a página
+                    
+                except Exception as e:
+                    st.error(f"Erro ao salvar: {e}")
+
+# --- PORTAL DE MEDIÇÃO (ADMIN) ---
+st.sidebar.markdown("---")
+if st.sidebar.checkbox("Portal de Medição"):
+    pw = st.sidebar.text_input("Senha:", type="password")
+    if pw == "Aura@2026":
+        st.header("📊 Portal de Medição")
         try:
             res_adm = supabase.table("registros").select("*").execute()
             df = pd.DataFrame(res_adm.data)
-            
             if not df.empty:
-                df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y').dt.date
-                mask = (df['data_dt'] >= d_inicio) & (df['data_dt'] <= d_fim)
-                df_filtrado = df.loc[mask].drop(columns=['data_dt'])
+                df = df[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
+                st.dataframe(df, use_container_width=True)
                 
-                if not df_filtrado.empty:
-                    st.write(f"Encontrados: {len(df_filtrado)} registros neste período.")
-                    df_exibir = df_filtrado[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
-                    st.dataframe(df_exibir, use_container_width=True)
-                    
-                    output = io.BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        df_exibir.to_excel(writer, index=False)
-                    
-                    st.download_button(
-                        label="📥 BAIXAR EXCEL DO PERÍODO", 
-                        data=output.getvalue(), 
-                        file_name=f"Medicao_{d_inicio.strftime('%d_%m_%Y')}_a_{d_fim.strftime('%d_%m_%Y')}.xlsx", 
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
-                        use_container_width=True
-                    )
-                else:
-                    st.warning("Nenhum registro encontrado para este período.")
-            else:
-                st.warning("O banco de dados de registros está vazio.")
+                # Gerando Excel na memória
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False)
                 
-        except Exception as e: 
-            st.error(f"Erro ao gerar relatório: {e}")
-
-
-# ==========================================
-# TELA 2: TOTEM DIGITAL (COLABORADORES)
-# ==========================================
-else:
-    st.title("🚀 Registro Digital - Refeitório")
-    st.markdown("---")
-
-    dados_usuarios = buscar_dados_colaboradores()
-    nomes_lista = sorted([u["nome"] for u in dados_usuarios])
-    nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes_lista, index=None)
-
-    if 'ultimo_nome' not in st.session_state or st.session_state.ultimo_nome != nome_selecionado:
-        st.session_state.usuario_autenticado = False
-        st.session_state.ultimo_nome = nome_selecionado
-
-    # --- FLUXO 1: NOVO CADASTRO ---
-    if nome_selecionado == "➕ NOVO CADASTRO...":
-        st.info("📝 Preencha os dados abaixo e crie sua senha de acesso.")
-        
-        n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
-        n_empresa = st.text_input("Empresa:").strip().upper()
-        n_senha = st.text_input("Crie uma Senha de Acesso (Ex: 1234):", type="password").strip()
-        
-        if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
-            if len(n_nome.split()) < 2:
-                st.error("⚠️ Digite o nome completo.")
-            elif n_empresa == "" or n_senha == "":
-                st.error("⚠️ Todos os campos, incluindo a Senha, são obrigatórios.")
-            elif n_nome in nomes_lista:
-                st.warning("⚠️ Este nome já está cadastrado.")
-            else:
-                try:
-                    supabase.table("colaboradores").insert({
-                        "nome": n_nome, 
-                        "empresa": n_empresa, 
-                        "senha": n_senha
-                    }).execute()
-                    
-                    st.success("✅ Cadastro realizado com sucesso! Agora, selecione seu nome na lista principal.")
-                    st.rerun()
-                    
-                except Exception as e:
-                    st.error(f"Erro ao salvar: {e}. Verifique se a coluna 'senha' foi criada no Supabase.")
-
-    # --- FLUXO 2: VALIDAÇÃO POR SENHA E REGISTRO ---
-    elif nome_selecionado:
-        
-        colab_info = next((u for u in dados_usuarios if u["nome"] == nome_selecionado), None)
-        senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
-
-        if not st.session_state.usuario_autenticado:
-            st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
-            senha_digitada = st.text_input("Digite sua Senha:", type="password")
-            
-            if st.button("CONFIRMAR IDENTIDADE"):
-                if senha_digitada.strip() == senha_db:
-                    st.session_state.usuario_autenticado = True
-                    st.rerun()
-                else:
-                    st.error("❌ Senha incorreta! Tente novamente.")
-
-        if st.session_state.usuario_autenticado:
-            
-            # TELA A: ESCOLHA DO ITEM
-            if not st.session_state.item_selecionado:
-                st.write(f"### Bem-vindo(a), **{nome_selecionado}**!")
-                c1, c2, c3, c4, c5 = st.columns(5)
-                
-                with c1: 
-                    if st.button("☕\nCAFÉ"): 
-                        st.session_state.item_selecionado = "CAFÉ"
-                        st.rerun()
-                with c2: 
-                    if st.button("🍵\nCHÁ"): 
-                        st.session_state.item_selecionado = "CHÁ"
-                        st.rerun()
-                with c3: 
-                    if st.button("🍱\nMARMITA"): 
-                        st.session_state.item_selecionado = "MARMITA"
-                        st.rerun()
-                with c4:
-                    p_a, m_a = verificar_regras_refeicao(nome_selecionado, "ALMOÇO")
-                    if st.button("🍽️\nALMOÇO", disabled=not p_a): 
-                        st.session_state.item_selecionado = "ALMOÇO"
-                        st.rerun()
-                    if not p_a: 
-                        st.caption(m_a)
-                with c5:
-                    p_j, m_j = verificar_regras_refeicao(nome_selecionado, "JANTAR")
-                    if st.button("🌙\nJANTAR", disabled=not p_j): 
-                        st.session_state.item_selecionado = "JANTAR"
-                        st.rerun()
-                    if not p_j: 
-                        st.caption(m_j)
-                        
-            # TELA B: QUANTIDADES E CONFIRMAÇÃO
-            else:
-                item = st.session_state.item_selecionado
-                st.warning(f"**Registrando: {item}**")
-                lista_final = []
-                
-                if item in ["CAFÉ", "CHÁ"]:
-                    st.write("**Quantas garrafas de cada tamanho você está levando?**")
-                    
-                    l1, l2, l3, l4 = st.columns(4)
-                    with l1: 
-                        q05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
-                        for _ in range(q05): lista_final.append("0.5 L")
-                    with l2: 
-                        q10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
-                        for _ in range(q10): lista_final.append("1.0 L")
-                    with l3: 
-                        q15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-                        for _ in range(q15): lista_final.append("1.5 L")
-                    with l4: 
-                        q18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
-                        for _ in range(q18): lista_final.append("1.8 L")
-                    
-                    l5, l6, l7 = st.columns(3)
-                    with l5: 
-                        q20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-                        for _ in range(q20): lista_final.append("2.0 L")
-                    with l6: 
-                        q25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-                        for _ in range(q25): lista_final.append("2.5 L")
-                    with l7: 
-                        q35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
-                        for _ in range(q35): lista_final.append("3.5 L")
-                        
-                    st.write("**Outro tamanho de garrafa?**")
-                    c_out1, c_out2 = st.columns(2)
-                    with c_out1: 
-                        litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
-                    with c_out2: 
-                        qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
-                        for _ in range(qtd_outro):
-                            if litro_outro > 0: lista_final.append(f"{litro_outro} L")
-
-                elif item == "MARMITA":
-                    qm = st.number_input("Quantidade de Marmitas:", 1, 10, 1)
-                    for _ in range(qm): lista_final.append("1 UN")
-                else:
-                    st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
-                    lista_final.append("1 UN")
-
-                st.markdown("---")
-                total_itens = len(lista_final)
-                if total_itens == 0:
-                    st.error("⚠️ Adicione a quantidade antes de confirmar.")
-                    
-                assinatura = st.checkbox(f"Confirmo a retirada de {total_itens} item(ns)", disabled=(total_itens==0))
-                
-                c_can, c_con = st.columns(2)
-                with c_can:
-                    if st.button("❌ CANCELAR E VOLTAR", use_container_width=True): 
-                        st.session_state.item_selecionado = None
-                        st.rerun()
-                with c_con:
-                    if st.button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True, disabled=not assinatura):
-                        try:
-                            cod = str(uuid.uuid4())[:8].upper()
-                            # Utiliza a hora ajustada para o banco de dados
-                            agora_mt = hora_local()
-                            dt = agora_mt.strftime("%d/%m/%Y")
-                            hr = agora_mt.strftime("%H:%M:%S")
-                            
-                            for lit in lista_final:
-                                supabase.table("registros").insert({
-                                    "data": dt, 
-                                    "hora": hr, 
-                                    "colaborador": nome_selecionado, 
-                                    "tipo": item, 
-                                    "litros": lit, 
-                                    "codigo_auditoria": cod
-                                }).execute()
-                                
-                            st.success("✅ Registro concluído com sucesso!")
-                            st.session_state.item_selecionado = None
-                            st.session_state.usuario_autenticado = False 
-                            st.balloons()
-                            
-                        except Exception as e: 
-                            st.error(f"Erro: {e}")
+                st.download_button(
+                    label="📥 BAIXAR PLANILHA (EXCEL)",
+                    data=output.getvalue(),
+                    file_name=f"Medicao_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+        except Exception as e: st.error(f"Erro: {e}")
+    elif pw != "": st.sidebar.error("Senha incorreta")
