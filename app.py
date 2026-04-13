@@ -34,6 +34,7 @@ supabase = init_connection()
 # --- FUNÇÕES DE APOIO ---
 
 def hora_local():
+    # Mantendo o Fuso Horário de MT
     return datetime.utcnow() - timedelta(hours=4)
 
 def buscar_dados_colaboradores():
@@ -148,7 +149,7 @@ else:
     st.title("🚀 Registro Digital - Refeitório")
     st.markdown("---")
 
-    # Sistema de aviso instantâneo
+    # Aviso instantâneo de sucesso na tela limpa
     if st.session_state.mostrar_sucesso:
         st.success("✅ Registro concluído com sucesso! O Totem está pronto para o próximo colaborador.")
         st.balloons()
@@ -166,7 +167,6 @@ else:
     if nome_selecionado == "➕ NOVO CADASTRO...":
         st.info("📝 Preencha os dados abaixo e crie sua senha de acesso.")
         
-        # Uso do FORMULÁRIO para garantir o clique único no cadastro
         with st.form("form_cadastro"):
             n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
             n_empresa = st.text_input("Empresa:").strip().upper()
@@ -183,14 +183,12 @@ else:
             else:
                 try:
                     supabase.table("colaboradores").insert({
-                        "nome": n_nome, 
-                        "empresa": n_empresa, 
-                        "senha": n_senha
+                        "nome": n_nome, "empresa": n_empresa, "senha": n_senha
                     }).execute()
                     
                     st.session_state.mostrar_sucesso = True
                     st.session_state.chave_identificacao = str(uuid.uuid4())
-                    try: st.rerun() except AttributeError: st.experimental_rerun()
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao salvar: {e}")
 
@@ -200,7 +198,6 @@ else:
         senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
         if not st.session_state.usuario_autenticado:
-            # Uso do FORMULÁRIO para o Login
             with st.form("form_login"):
                 st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
                 senha_digitada = st.text_input("Digite sua Senha:", type="password")
@@ -209,7 +206,7 @@ else:
             if btn_login:
                 if senha_digitada.strip() == senha_db:
                     st.session_state.usuario_autenticado = True
-                    try: st.rerun() except AttributeError: st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("❌ Senha incorreta! Tente novamente.")
 
@@ -223,33 +220,34 @@ else:
                 with c1: 
                     if st.button("☕\nCAFÉ"): 
                         st.session_state.item_selecionado = "CAFÉ"
-                        try: st.rerun() except AttributeError: st.experimental_rerun()
+                        st.rerun()
                 with c2: 
                     if st.button("🍵\nCHÁ"): 
                         st.session_state.item_selecionado = "CHÁ"
-                        try: st.rerun() except AttributeError: st.experimental_rerun()
+                        st.rerun()
                 with c3: 
                     if st.button("🍱\nMARMITA"): 
                         st.session_state.item_selecionado = "MARMITA"
-                        try: st.rerun() except AttributeError: st.experimental_rerun()
+                        st.rerun()
                 with c4:
                     p_a, m_a = verificar_regras_refeicao(nome_selecionado, "ALMOÇO")
                     if st.button("🍽️\nALMOÇO", disabled=not p_a): 
                         st.session_state.item_selecionado = "ALMOÇO"
-                        try: st.rerun() except AttributeError: st.experimental_rerun()
+                        st.rerun()
                     if not p_a: st.caption(m_a)
                 with c5:
                     p_j, m_j = verificar_regras_refeicao(nome_selecionado, "JANTAR")
                     if st.button("🌙\nJANTAR", disabled=not p_j): 
                         st.session_state.item_selecionado = "JANTAR"
-                        try: st.rerun() except AttributeError: st.experimental_rerun()
+                        st.rerun()
                     if not p_j: st.caption(m_j)
                     
-            # TELA B: QUANTIDADES E CONFIRMAÇÃO (TOTALMENTE BLINDADA COM FORMULÁRIO)
+            # TELA B: QUANTIDADES E CONFIRMAÇÃO (TOTALMENTE BLINDADA)
             else:
                 item = st.session_state.item_selecionado
                 st.warning(f"**Registrando: {item}**")
                 
+                # O st.form cria uma "caixa" que segura o clique até você enviar tudo
                 with st.form("form_registro", clear_on_submit=False):
                     if item in ["CAFÉ", "CHÁ"]:
                         st.write("**Quantas garrafas de cada tamanho você está levando?**")
@@ -283,10 +281,10 @@ else:
                     with c_con:
                         btn_confirmar = st.form_submit_button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True)
 
-                # Processamento exato de um clique
+                # Ações baseadas nos cliques do formulário
                 if btn_cancelar:
                     st.session_state.item_selecionado = None
-                    try: st.rerun() except AttributeError: st.experimental_rerun()
+                    st.rerun()
 
                 if btn_confirmar:
                     lista_final = []
@@ -307,6 +305,7 @@ else:
 
                     total_itens = len(lista_final)
 
+                    # Validações antes de enviar
                     if total_itens == 0:
                         st.error("⚠️ Adicione a quantidade antes de confirmar.")
                     elif not assinatura:
@@ -328,13 +327,14 @@ else:
                                     "codigo_auditoria": cod
                                 }).execute()
                                 
+                            # Reseta tudo e chama os balões!
                             st.session_state.mostrar_sucesso = True
                             st.session_state.item_selecionado = None
                             st.session_state.usuario_autenticado = False 
                             st.session_state.ultimo_nome = None
                             st.session_state.chave_identificacao = str(uuid.uuid4())
                             
-                            try: st.rerun() except AttributeError: st.experimental_rerun()
+                            st.rerun()
                             
                         except Exception as e: 
                             st.error(f"Erro: {e}")
