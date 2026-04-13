@@ -34,7 +34,7 @@ supabase = init_connection()
 # --- FUNÇÕES DE APOIO ---
 
 def hora_local():
-    # Mantendo o Fuso Horário de MT
+    # Fuso de MT (UTC-4)
     return datetime.utcnow() - timedelta(hours=4)
 
 def buscar_dados_colaboradores():
@@ -149,10 +149,11 @@ else:
     st.title("🚀 Registro Digital - Refeitório")
     st.markdown("---")
 
-    # Aviso instantâneo de sucesso na tela limpa
+    # Verifica se o status de sucesso do registro anterior foi ativado
     if st.session_state.mostrar_sucesso:
         st.success("✅ Registro concluído com sucesso! O Totem está pronto para o próximo colaborador.")
         st.balloons()
+        # Limpa o status para não repetir a animação se a pessoa clicar em outra coisa
         st.session_state.mostrar_sucesso = False
 
     dados_usuarios = buscar_dados_colaboradores()
@@ -167,13 +168,11 @@ else:
     if nome_selecionado == "➕ NOVO CADASTRO...":
         st.info("📝 Preencha os dados abaixo e crie sua senha de acesso.")
         
-        with st.form("form_cadastro"):
-            n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
-            n_empresa = st.text_input("Empresa:").strip().upper()
-            n_senha = st.text_input("Crie uma Senha de Acesso (Ex: 1234):", type="password").strip()
-            btn_salvar = st.form_submit_button("💾 SALVAR CADASTRO", type="primary", use_container_width=True)
+        n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
+        n_empresa = st.text_input("Empresa:").strip().upper()
+        n_senha = st.text_input("Crie uma Senha de Acesso (Ex: 1234):", type="password").strip()
         
-        if btn_salvar:
+        if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
             if len(n_nome.split()) < 2:
                 st.error("⚠️ Digite o nome completo.")
             elif n_empresa == "" or n_senha == "":
@@ -183,14 +182,17 @@ else:
             else:
                 try:
                     supabase.table("colaboradores").insert({
-                        "nome": n_nome, "empresa": n_empresa, "senha": n_senha
+                        "nome": n_nome, 
+                        "empresa": n_empresa, 
+                        "senha": n_senha
                     }).execute()
                     
                     st.session_state.mostrar_sucesso = True
                     st.session_state.chave_identificacao = str(uuid.uuid4())
                     st.rerun()
+                    
                 except Exception as e:
-                    st.error(f"Erro ao salvar: {e}")
+                    st.error(f"Erro ao salvar: {e}. Verifique a coluna 'senha' no Supabase.")
 
     # --- FLUXO 2: VALIDAÇÃO POR SENHA E REGISTRO ---
     elif nome_selecionado:
@@ -198,12 +200,10 @@ else:
         senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
         if not st.session_state.usuario_autenticado:
-            with st.form("form_login"):
-                st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
-                senha_digitada = st.text_input("Digite sua Senha:", type="password")
-                btn_login = st.form_submit_button("CONFIRMAR IDENTIDADE", type="primary")
+            st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
+            senha_digitada = st.text_input("Digite sua Senha:", type="password")
             
-            if btn_login:
+            if st.button("CONFIRMAR IDENTIDADE"):
                 if senha_digitada.strip() == senha_db:
                     st.session_state.usuario_autenticado = True
                     st.rerun()
@@ -211,7 +211,6 @@ else:
                     st.error("❌ Senha incorreta! Tente novamente.")
 
         if st.session_state.usuario_autenticado:
-            
             # TELA A: ESCOLHA DO ITEM
             if not st.session_state.item_selecionado:
                 st.write(f"### Bem-vindo(a), **{nome_selecionado}**!")
@@ -242,75 +241,68 @@ else:
                         st.rerun()
                     if not p_j: st.caption(m_j)
                     
-            # TELA B: QUANTIDADES E CONFIRMAÇÃO (TOTALMENTE BLINDADA)
+            # TELA B: QUANTIDADES E CONFIRMAÇÃO
             else:
                 item = st.session_state.item_selecionado
                 st.warning(f"**Registrando: {item}**")
+                lista_final = []
                 
-                # O st.form cria uma "caixa" que segura o clique até você enviar tudo
-                with st.form("form_registro", clear_on_submit=False):
-                    if item in ["CAFÉ", "CHÁ"]:
-                        st.write("**Quantas garrafas de cada tamanho você está levando?**")
-                        l1, l2, l3, l4 = st.columns(4)
-                        with l1: q05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
-                        with l2: q10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
-                        with l3: q15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-                        with l4: q18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
-                        
-                        l5, l6, l7 = st.columns(3)
-                        with l5: q20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-                        with l6: q25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-                        with l7: q35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
-                            
-                        st.write("**Outro tamanho de garrafa?**")
-                        c_out1, c_out2 = st.columns(2)
-                        with c_out1: litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
-                        with c_out2: qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
-
-                    elif item == "MARMITA":
-                        qm = st.number_input("Quantidade de Marmitas:", 1, 10, 1)
-                    else:
-                        st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
-
-                    st.markdown("---")
-                    assinatura = st.checkbox("Declaro e confirmo a retirada dos itens preenchidos acima.")
-                    
-                    c_can, c_con = st.columns(2)
-                    with c_can:
-                        btn_cancelar = st.form_submit_button("❌ CANCELAR E VOLTAR", use_container_width=True)
-                    with c_con:
-                        btn_confirmar = st.form_submit_button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True)
-
-                # Ações baseadas nos cliques do formulário
-                if btn_cancelar:
-                    st.session_state.item_selecionado = None
-                    st.rerun()
-
-                if btn_confirmar:
-                    lista_final = []
-                    if item in ["CAFÉ", "CHÁ"]:
+                if item in ["CAFÉ", "CHÁ"]:
+                    st.write("**Quantas garrafas de cada tamanho você está levando?**")
+                    l1, l2, l3, l4 = st.columns(4)
+                    with l1: 
+                        q05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
                         for _ in range(q05): lista_final.append("0.5 L")
+                    with l2: 
+                        q10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
                         for _ in range(q10): lista_final.append("1.0 L")
+                    with l3: 
+                        q15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
                         for _ in range(q15): lista_final.append("1.5 L")
+                    with l4: 
+                        q18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
                         for _ in range(q18): lista_final.append("1.8 L")
+                    
+                    l5, l6, l7 = st.columns(3)
+                    with l5: 
+                        q20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
                         for _ in range(q20): lista_final.append("2.0 L")
+                    with l6: 
+                        q25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
                         for _ in range(q25): lista_final.append("2.5 L")
+                    with l7: 
+                        q35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
                         for _ in range(q35): lista_final.append("3.5 L")
+                        
+                    st.write("**Outro tamanho de garrafa?**")
+                    c_out1, c_out2 = st.columns(2)
+                    with c_out1: litro_outro = st.number_input("Tamanho (Litros):", 0.0, 10.0, 0.0, step=0.1)
+                    with c_out2: 
+                        qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
                         for _ in range(qtd_outro):
                             if litro_outro > 0: lista_final.append(f"{litro_outro} L")
-                    elif item == "MARMITA":
-                        for _ in range(qm): lista_final.append("1 UN")
-                    else:
-                        lista_final.append("1 UN")
 
-                    total_itens = len(lista_final)
+                elif item == "MARMITA":
+                    qm = st.number_input("Quantidade de Marmitas:", 1, 10, 1)
+                    for _ in range(qm): lista_final.append("1 UN")
+                else:
+                    st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
+                    lista_final.append("1 UN")
 
-                    # Validações antes de enviar
-                    if total_itens == 0:
-                        st.error("⚠️ Adicione a quantidade antes de confirmar.")
-                    elif not assinatura:
-                        st.error("⚠️ Você precisa marcar a caixinha declarando a retirada antes de confirmar.")
-                    else:
+                st.markdown("---")
+                total_itens = len(lista_final)
+                if total_itens == 0:
+                    st.error("⚠️ Adicione a quantidade antes de confirmar.")
+                    
+                assinatura = st.checkbox(f"Confirmo a retirada de {total_itens} item(ns)", disabled=(total_itens==0))
+                
+                c_can, c_con = st.columns(2)
+                with c_can:
+                    if st.button("❌ CANCELAR E VOLTAR", use_container_width=True): 
+                        st.session_state.item_selecionado = None
+                        st.rerun()
+                with c_con:
+                    if st.button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True, disabled=not assinatura):
                         try:
                             cod = str(uuid.uuid4())[:8].upper()
                             agora_mt = hora_local()
@@ -327,13 +319,19 @@ else:
                                     "codigo_auditoria": cod
                                 }).execute()
                                 
-                            # Reseta tudo e chama os balões!
+                            # O SEGREDO DO "CLIQUE ÚNICO" ESTÁ AQUI:
+                            # 1. Ativa a mensagem de sucesso
                             st.session_state.mostrar_sucesso = True
+                            
+                            # 2. Desloga o usuário e esvazia o carrinho
                             st.session_state.item_selecionado = None
                             st.session_state.usuario_autenticado = False 
                             st.session_state.ultimo_nome = None
+                            
+                            # 3. Muda a 'chave' do selectbox para forçá-lo a zerar e exibir "IDENTIFIQUE-SE"
                             st.session_state.chave_identificacao = str(uuid.uuid4())
                             
+                            # 4. Recarrega a tela instantaneamente (agora ela vai abrir limpa e soltar os balões!)
                             st.rerun()
                             
                         except Exception as e: 
