@@ -23,6 +23,13 @@ supabase = init_connection()
 
 # --- FUNÇÕES DE APOIO ---
 
+def hora_local():
+    """
+    Força o sistema a utilizar o fuso horário de Mato Grosso (UTC-4),
+    ignorando o relógio global (UTC) do servidor do Streamlit.
+    """
+    return datetime.utcnow() - timedelta(hours=4)
+
 def buscar_dados_colaboradores():
     try:
         res = supabase.table("colaboradores").select("nome, senha").execute()
@@ -31,14 +38,11 @@ def buscar_dados_colaboradores():
         return []
 
 def verificar_regras_refeicao(nome, tipo_refeicao):
-    """
-    Nova função blindada: Verifica o relógio (horário de funcionamento) 
-    e se a pessoa já consumiu aquela refeição no dia de hoje.
-    """
     if tipo_refeicao not in ["ALMOÇO", "JANTAR"]:
         return True, ""
     
-    agora = datetime.now()
+    # Utiliza o horário ajustado para MT
+    agora = hora_local()
     hora_atual = agora.hour
     data_hoje = agora.strftime("%d/%m/%Y")
     
@@ -48,11 +52,10 @@ def verificar_regras_refeicao(nome, tipo_refeicao):
             return False, "Fora do horário (10h às 14h)"
             
     elif tipo_refeicao == "JANTAR":
-        # Hora >= 20 significa das 20:00 até as 23:59
         if hora_atual < 20: 
             return False, "Fora do horário (20h às 00h)"
             
-    # REGRA 2: Consumo Único (Apenas 1 por dia dentro daquela janela)
+    # REGRA 2: Consumo Único 
     try:
         res = supabase.table("registros").select("id").eq("colaborador", nome).eq("data", data_hoje).eq("tipo", tipo_refeicao).limit(1).execute()
         
@@ -95,11 +98,9 @@ if senha_admin_ok:
     
     col_i, col_f = st.columns(2)
     with col_i:
-        # FORMATO BRASILEIRO APLICADO AQUI: format="DD/MM/YYYY"
-        d_inicio = st.date_input("Data Início:", datetime.now() - timedelta(days=30), format="DD/MM/YYYY")
+        d_inicio = st.date_input("Data Início:", hora_local() - timedelta(days=30), format="DD/MM/YYYY")
     with col_f:
-        # FORMATO BRASILEIRO APLICADO AQUI: format="DD/MM/YYYY"
-        d_fim = st.date_input("Data Fim:", datetime.now(), format="DD/MM/YYYY")
+        d_fim = st.date_input("Data Fim:", hora_local(), format="DD/MM/YYYY")
 
     if st.button("🔍 CARREGAR DADOS DO PERÍODO", use_container_width=True):
         try:
@@ -147,7 +148,6 @@ else:
     nomes_lista = sorted([u["nome"] for u in dados_usuarios])
     nome_selecionado = st.selectbox("IDENTIFIQUE-SE:", ["➕ NOVO CADASTRO..."] + nomes_lista, index=None)
 
-    # Reset de autenticação se mudar o nome selecionado
     if 'ultimo_nome' not in st.session_state or st.session_state.ultimo_nome != nome_selecionado:
         st.session_state.usuario_autenticado = False
         st.session_state.ultimo_nome = nome_selecionado
@@ -187,7 +187,6 @@ else:
         colab_info = next((u for u in dados_usuarios if u["nome"] == nome_selecionado), None)
         senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
-        # Solicitação da senha
         if not st.session_state.usuario_autenticado:
             st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
             senha_digitada = st.text_input("Digite sua Senha:", type="password")
@@ -199,7 +198,6 @@ else:
                 else:
                     st.error("❌ Senha incorreta! Tente novamente.")
 
-        # Se a senha estiver correta, libera o menu completo
         if st.session_state.usuario_autenticado:
             
             # TELA A: ESCOLHA DO ITEM
@@ -220,7 +218,6 @@ else:
                         st.session_state.item_selecionado = "MARMITA"
                         st.rerun()
                 with c4:
-                    # Utilizando a NOVA função de regras
                     p_a, m_a = verificar_regras_refeicao(nome_selecionado, "ALMOÇO")
                     if st.button("🍽️\nALMOÇO", disabled=not p_a): 
                         st.session_state.item_selecionado = "ALMOÇO"
@@ -228,7 +225,6 @@ else:
                     if not p_a: 
                         st.caption(m_a)
                 with c5:
-                    # Utilizando a NOVA função de regras
                     p_j, m_j = verificar_regras_refeicao(nome_selecionado, "JANTAR")
                     if st.button("🌙\nJANTAR", disabled=not p_j): 
                         st.session_state.item_selecionado = "JANTAR"
@@ -248,34 +244,27 @@ else:
                     l1, l2, l3, l4 = st.columns(4)
                     with l1: 
                         q05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
-                        for _ in range(q05): 
-                            lista_final.append("0.5 L")
+                        for _ in range(q05): lista_final.append("0.5 L")
                     with l2: 
                         q10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
-                        for _ in range(q10): 
-                            lista_final.append("1.0 L")
+                        for _ in range(q10): lista_final.append("1.0 L")
                     with l3: 
                         q15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-                        for _ in range(q15): 
-                            lista_final.append("1.5 L")
+                        for _ in range(q15): lista_final.append("1.5 L")
                     with l4: 
                         q18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
-                        for _ in range(q18): 
-                            lista_final.append("1.8 L")
+                        for _ in range(q18): lista_final.append("1.8 L")
                     
                     l5, l6, l7 = st.columns(3)
                     with l5: 
                         q20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-                        for _ in range(q20): 
-                            lista_final.append("2.0 L")
+                        for _ in range(q20): lista_final.append("2.0 L")
                     with l6: 
                         q25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-                        for _ in range(q25): 
-                            lista_final.append("2.5 L")
+                        for _ in range(q25): lista_final.append("2.5 L")
                     with l7: 
                         q35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
-                        for _ in range(q35): 
-                            lista_final.append("3.5 L")
+                        for _ in range(q35): lista_final.append("3.5 L")
                         
                     st.write("**Outro tamanho de garrafa?**")
                     c_out1, c_out2 = st.columns(2)
@@ -284,13 +273,11 @@ else:
                     with c_out2: 
                         qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
                         for _ in range(qtd_outro):
-                            if litro_outro > 0: 
-                                lista_final.append(f"{litro_outro} L")
+                            if litro_outro > 0: lista_final.append(f"{litro_outro} L")
 
                 elif item == "MARMITA":
                     qm = st.number_input("Quantidade de Marmitas:", 1, 10, 1)
-                    for _ in range(qm): 
-                        lista_final.append("1 UN")
+                    for _ in range(qm): lista_final.append("1 UN")
                 else:
                     st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
                     lista_final.append("1 UN")
@@ -311,8 +298,10 @@ else:
                     if st.button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True, disabled=not assinatura):
                         try:
                             cod = str(uuid.uuid4())[:8].upper()
-                            dt = datetime.now().strftime("%d/%m/%Y")
-                            hr = datetime.now().strftime("%H:%M:%S")
+                            # Utiliza a hora ajustada para o banco de dados
+                            agora_mt = hora_local()
+                            dt = agora_mt.strftime("%d/%m/%Y")
+                            hr = agora_mt.strftime("%H:%M:%S")
                             
                             for lit in lista_final:
                                 supabase.table("registros").insert({
