@@ -8,16 +8,6 @@ import io
 # 1. CONFIGURAÇÃO DA PÁGINA
 st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
 
-# --- OCULTAR MENU E RODAPÉ DO STREAMLIT ---
-esconder_menu = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-    """
-st.markdown(esconder_menu, unsafe_allow_html=True)
-
 # 2. CONEXÃO COM O BANCO DE DADOS
 @st.cache_resource
 def init_connection():
@@ -34,7 +24,7 @@ supabase = init_connection()
 # --- FUNÇÕES DE APOIO ---
 
 def hora_local():
-    # Fuso de MT (UTC-4)
+    # Ajuste para o fuso horário de Mato Grosso (UTC-4)
     return datetime.utcnow() - timedelta(hours=4)
 
 def buscar_dados_colaboradores():
@@ -52,6 +42,7 @@ def verificar_regras_refeicao(nome, tipo_refeicao):
     hora_atual = agora.hour
     data_hoje = agora.strftime("%d/%m/%Y")
     
+    # Validação do horário de funcionamento do refeitório
     if tipo_refeicao == "ALMOÇO":
         if not (10 <= hora_atual < 14):
             return False, "Fora do horário (10h às 14h)"
@@ -59,6 +50,7 @@ def verificar_regras_refeicao(nome, tipo_refeicao):
         if hora_atual < 20: 
             return False, "Fora do horário (20h às 00h)"
             
+    # Validação de consumo único por dia/turno
     try:
         res = supabase.table("registros").select("id").eq("colaborador", nome).eq("data", data_hoje).eq("tipo", tipo_refeicao).limit(1).execute()
         if res.data:
@@ -149,11 +141,9 @@ else:
     st.title("🚀 Registro Digital - Refeitório")
     st.markdown("---")
 
-    # Verifica se o status de sucesso do registro anterior foi ativado
     if st.session_state.mostrar_sucesso:
         st.success("✅ Registro concluído com sucesso! O Totem está pronto para o próximo colaborador.")
         st.balloons()
-        # Limpa o status para não repetir a animação se a pessoa clicar em outra coisa
         st.session_state.mostrar_sucesso = False
 
     dados_usuarios = buscar_dados_colaboradores()
@@ -164,7 +154,7 @@ else:
         st.session_state.usuario_autenticado = False
         st.session_state.ultimo_nome = nome_selecionado
 
-    # --- FLUXO 1: NOVO CADASTRO (Agora usando Formulário para clique único) ---
+    # --- FLUXO 1: NOVO CADASTRO ---
     if nome_selecionado == "➕ NOVO CADASTRO...":
         st.info("📝 Preencha os dados abaixo e crie sua senha de acesso.")
         
@@ -194,7 +184,7 @@ else:
                     st.rerun()
                     
                 except Exception as e:
-                    st.error(f"Erro ao salvar: {e}. Verifique a coluna 'senha' no Supabase.")
+                    st.error(f"Erro ao salvar: {e}")
 
     # --- FLUXO 2: VALIDAÇÃO POR SENHA E REGISTRO ---
     elif nome_selecionado:
@@ -245,7 +235,7 @@ else:
                         st.rerun()
                     if not p_j: st.caption(m_j)
                     
-            # TELA B: QUANTIDADES E CONFIRMAÇÃO (Agora usando Formulário para o clique único)
+            # TELA B: QUANTIDADES E CONFIRMAÇÃO
             else:
                 item = st.session_state.item_selecionado
                 st.warning(f"**Registrando: {item}**")
@@ -327,7 +317,6 @@ else:
                                     "codigo_auditoria": cod
                                 }).execute()
                                 
-                            # O SEGREDO DO "CLIQUE ÚNICO" ESTÁ AQUI:
                             st.session_state.mostrar_sucesso = True
                             st.session_state.item_selecionado = None
                             st.session_state.usuario_autenticado = False 
