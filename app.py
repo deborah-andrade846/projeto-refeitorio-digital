@@ -25,7 +25,7 @@ supabase = init_connection()
 
 def buscar_dados_colaboradores():
     try:
-        # Buscamos agora o nome e a senha criada
+        # Buscamos o nome e a senha para validação
         res = supabase.table("colaboradores").select("nome, senha").execute()
         return res.data
     except:
@@ -67,47 +67,55 @@ if 'ultimo_nome' not in st.session_state or st.session_state.ultimo_nome != nome
     st.session_state.ultimo_nome = nome_selecionado
 
 # ==========================================
-# FLUXO 1: NOVO CADASTRO COM CRIAÇÃO DE SENHA
+# FLUXO 1: NOVO CADASTRO COM CAMPO DE SENHA
 # ==========================================
 if nome_selecionado == "➕ NOVO CADASTRO...":
     st.info("📝 Preencha os dados abaixo e crie sua senha de acesso.")
-    n_nome = st.text_input("Nome Completo:").strip().upper()
+    
+    n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
     n_empresa = st.text_input("Empresa:").strip().upper()
-    n_senha = st.text_input("Crie uma Senha Numérica (Ex: 1234):", type="password").strip()
+    
+    # ESTE É O CAMPO QUE ESTAVA FALTANDO NO SEU TESTE:
+    n_senha = st.text_input("Crie uma Senha de Acesso (Ex: 1234):", type="password").strip()
     
     if st.button("💾 SALVAR CADASTRO", type="primary", use_container_width=True):
         if len(n_nome.split()) < 2:
-            st.error("⚠️ Digite o nome completo (Nome e Sobrenome).")
+            st.error("⚠️ Digite o nome completo.")
         elif n_empresa == "" or n_senha == "":
-            st.error("⚠️ Empresa e Senha são obrigatórios.")
+            st.error("⚠️ Todos os campos, incluindo a Senha, são obrigatórios.")
+        elif n_nome in nomes_lista:
+            st.warning("⚠️ Este nome já está cadastrado.")
         else:
             try:
+                # Salva no banco de dados com a nova coluna 'senha'
                 supabase.table("colaboradores").insert({
                     "nome": n_nome, "empresa": n_empresa, "senha": n_senha
                 }).execute()
-                st.success("✅ Cadastro realizado! Selecione seu nome para entrar.")
+                st.success("✅ Cadastro realizado com sucesso! Agora, selecione seu nome na lista principal.")
                 st.rerun()
             except Exception as e:
-                st.error(f"Erro ao salvar: {e}")
+                st.error(f"Erro ao salvar: {e}. Verifique se a coluna 'senha' foi criada no Supabase.")
 
 # ==========================================
 # FLUXO 2: VALIDAÇÃO POR SENHA E REGISTRO
 # ==========================================
 elif nome_selecionado:
-    # Busca a senha correta do usuário selecionado
+    # Busca a senha correta cadastrada para este nome
     colab_info = next((u for u in dados_usuarios if u["nome"] == nome_selecionado), None)
-    senha_correta = str(colab_info["senha"]).strip() if colab_info else None
+    senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
     if not st.session_state.usuario_autenticado:
-        st.warning(f"Olá {nome_selecionado}, digite sua senha para continuar.")
-        senha_digitada = st.text_input("Sua Senha:", type="password")
-        if st.button("ENTRAR"):
-            if senha_digitada.strip() == senha_correta:
+        st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
+        senha_digitada = st.text_input("Digite sua Senha:", type="password")
+        
+        if st.button("CONFIRMAR IDENTIDADE"):
+            if senha_digitada.strip() == senha_db:
                 st.session_state.usuario_autenticado = True
                 st.rerun()
             else:
-                st.error("❌ Senha incorreta!")
+                st.error("❌ Senha incorreta! Tente novamente.")
 
+    # Se a senha estiver correta, libera o menu de refeições
     if st.session_state.usuario_autenticado:
         if not st.session_state.item_selecionado:
             st.write(f"### Bem-vindo(a), **{nome_selecionado}**!")
@@ -127,6 +135,7 @@ elif nome_selecionado:
                 if st.button("🌙\nJANTAR", disabled=not p_j): st.session_state.item_selecionado = "JANTAR"; st.rerun()
                 if not p_j: st.caption(m_j)
         else:
+            # Lógica de confirmação de quantidade (Consolidada)
             item = st.session_state.item_selecionado
             st.warning(f"**Registrando: {item}**")
             lista_final = []
@@ -147,14 +156,14 @@ elif nome_selecionado:
                 lista_final.append("1 UN")
 
             st.markdown("---")
-            total_ret = len(lista_final)
-            assinatura = st.checkbox(f"Assino a retirada", disabled=(total_ret==0))
+            total_itens = len(lista_final)
+            assinatura = st.checkbox(f"Confirmo a retirada de {total_itens} item(ns)", disabled=(total_itens==0))
             
             c_can, c_con = st.columns(2)
             with c_can:
                 if st.button("❌ CANCELAR"): st.session_state.item_selecionado = None; st.rerun()
             with c_con:
-                if st.button("✅ CONFIRMAR", type="primary", disabled=not assinatura):
+                if st.button("✅ CONFIRMAR REGISTRO", type="primary", disabled=not assinatura):
                     try:
                         cod = str(uuid.uuid4())[:8].upper()
                         dt, hr = datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%H:%M:%S")
@@ -163,53 +172,43 @@ elif nome_selecionado:
                                 "data": dt, "hora": hr, "colaborador": nome_selecionado, 
                                 "tipo": item, "litros": lit, "codigo_auditoria": cod
                             }).execute()
-                        st.success(f"✅ Registrado!")
+                        st.success("✅ Tudo pronto!")
                         st.session_state.item_selecionado = None
-                        st.session_state.usuario_autenticado = False
+                        st.session_state.usuario_autenticado = False # Desloga para o próximo da fila
                         st.balloons()
                     except Exception as e: st.error(f"Erro: {e}")
 
 # --- PORTAL DE MEDIÇÃO COM FILTRO POR PERÍODO ---
 st.sidebar.markdown("---")
 if st.sidebar.checkbox("Portal de Medição"):
-    pw = st.sidebar.text_input("Senha Admin:", type="password")
-    if pw == "Aura@2026":
+    pw_admin = st.sidebar.text_input("Senha Admin:", type="password")
+    if pw_admin == "Aura@2026":
         st.header("📊 Filtro de Medição")
-        
-        # Seletores de Data
         col_i, col_f = st.columns(2)
         with col_i:
             d_inicio = st.date_input("De:", datetime.now() - timedelta(days=7))
         with col_f:
             d_fim = st.date_input("Até:", datetime.now())
 
-        if st.button("🔍 CARREGAR PERÍODO", use_container_width=True):
+        if st.button("🔍 CARREGAR DADOS", use_container_width=True):
             try:
                 res_adm = supabase.table("registros").select("*").execute()
                 df = pd.DataFrame(res_adm.data)
-                
                 if not df.empty:
-                    # Filtramos pela coluna 'data' convertendo para o formato de data real
                     df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y').dt.date
                     mask = (df['data_dt'] >= d_inicio) & (df['data_dt'] <= d_fim)
                     df_filtrado = df.loc[mask].drop(columns=['data_dt'])
-
+                    
                     if not df_filtrado.empty:
-                        st.write(f"Registros encontrados: {len(df_filtrado)}")
-                        st.dataframe(df_filtrado[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]], use_container_width=True)
+                        st.write(f"Encontrados: {len(df_filtrado)} registros.")
+                        df_exibir = df_filtrado[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
+                        st.dataframe(df_exibir, use_container_width=True)
                         
                         output = io.BytesIO()
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                            df_filtrado.to_excel(writer, index=False, sheet_name='Medicao')
+                            df_exibir.to_excel(writer, index=False)
                         
-                        st.download_button(
-                            label="📥 BAIXAR EXCEL DO PERÍODO",
-                            data=output.getvalue(),
-                            file_name=f"Medicao_{d_inicio}_a_{d_fim}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
+                        st.download_button("📥 BAIXAR EXCEL", output.getvalue(), f"Medicao_{d_inicio}_{d_fim}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                     else:
-                        st.warning("Nenhum registro encontrado neste período.")
-            except Exception as e: st.error(f"Erro ao filtrar: {e}")
-    elif pw != "": st.sidebar.error("Senha incorreta")
+                        st.warning("Nenhum registro para este período.")
+            except Exception as e: st.error(f"Erro: {e}")
