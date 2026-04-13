@@ -33,22 +33,28 @@ def buscar_dados_colaboradores():
 def verificar_trava_tempo(nome, tipo_refeicao):
     if tipo_refeicao not in ["ALMOÇO", "JANTAR"]:
         return True, ""
+    
     agora = datetime.now()
     data_hoje = agora.strftime("%d/%m/%Y")
+    
     try:
         res = supabase.table("registros").select("hora").eq("colaborador", nome).eq("data", data_hoje).eq("tipo", tipo_refeicao).order("hora", desc=True).limit(1).execute()
+        
         if res.data:
             ultima_h = datetime.strptime(res.data[0]['hora'], "%H:%M:%S")
             diff = agora - datetime.combine(agora.date(), ultima_h.time())
+            
             if diff.total_seconds() < 14400: # 4 horas
                 return False, f"Bloqueado: Registro recente de {tipo_refeicao} (< 4h)."
     except:
         pass
+    
     return True, ""
 
 # --- ESTADO DO SISTEMA ---
 if 'item_selecionado' not in st.session_state:
     st.session_state.item_selecionado = None
+
 if 'usuario_autenticado' not in st.session_state:
     st.session_state.usuario_autenticado = False
 
@@ -85,10 +91,14 @@ if nome_selecionado == "➕ NOVO CADASTRO...":
         else:
             try:
                 supabase.table("colaboradores").insert({
-                    "nome": n_nome, "empresa": n_empresa, "senha": n_senha
+                    "nome": n_nome, 
+                    "empresa": n_empresa, 
+                    "senha": n_senha
                 }).execute()
+                
                 st.success("✅ Cadastro realizado com sucesso! Agora, selecione seu nome na lista principal.")
                 st.rerun()
+                
             except Exception as e:
                 st.error(f"Erro ao salvar: {e}. Verifique se a coluna 'senha' foi criada no Supabase.")
 
@@ -96,9 +106,11 @@ if nome_selecionado == "➕ NOVO CADASTRO...":
 # FLUXO 2: VALIDAÇÃO POR SENHA E REGISTRO
 # ==========================================
 elif nome_selecionado:
+    
     colab_info = next((u for u in dados_usuarios if u["nome"] == nome_selecionado), None)
     senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
+    # Solicitação da senha
     if not st.session_state.usuario_autenticado:
         st.warning(f"Olá {nome_selecionado}, digite sua senha para liberar o totem.")
         senha_digitada = st.text_input("Digite sua Senha:", type="password")
@@ -110,24 +122,42 @@ elif nome_selecionado:
             else:
                 st.error("❌ Senha incorreta! Tente novamente.")
 
+    # Se a senha estiver correta, libera o menu completo
     if st.session_state.usuario_autenticado:
+        
+        # TELA A: ESCOLHA DO ITEM
         if not st.session_state.item_selecionado:
             st.write(f"### Bem-vindo(a), **{nome_selecionado}**!")
             c1, c2, c3, c4, c5 = st.columns(5)
+            
             with c1: 
-                if st.button("☕\nCAFÉ"): st.session_state.item_selecionado = "CAFÉ"; st.rerun()
+                if st.button("☕\nCAFÉ"): 
+                    st.session_state.item_selecionado = "CAFÉ"
+                    st.rerun()
             with c2: 
-                if st.button("🍵\nCHÁ"): st.session_state.item_selecionado = "CHÁ"; st.rerun()
+                if st.button("🍵\nCHÁ"): 
+                    st.session_state.item_selecionado = "CHÁ"
+                    st.rerun()
             with c3: 
-                if st.button("🍱\nMARMITA"): st.session_state.item_selecionado = "MARMITA"; st.rerun()
+                if st.button("🍱\nMARMITA"): 
+                    st.session_state.item_selecionado = "MARMITA"
+                    st.rerun()
             with c4:
                 p_a, m_a = verificar_trava_tempo(nome_selecionado, "ALMOÇO")
-                if st.button("🍽️\nALMOÇO", disabled=not p_a): st.session_state.item_selecionado = "ALMOÇO"; st.rerun()
-                if not p_a: st.caption(m_a)
+                if st.button("🍽️\nALMOÇO", disabled=not p_a): 
+                    st.session_state.item_selecionado = "ALMOÇO"
+                    st.rerun()
+                if not p_a: 
+                    st.caption(m_a)
             with c5:
                 p_j, m_j = verificar_trava_tempo(nome_selecionado, "JANTAR")
-                if st.button("🌙\nJANTAR", disabled=not p_j): st.session_state.item_selecionado = "JANTAR"; st.rerun()
-                if not p_j: st.caption(m_j)
+                if st.button("🌙\nJANTAR", disabled=not p_j): 
+                    st.session_state.item_selecionado = "JANTAR"
+                    st.rerun()
+                if not p_j: 
+                    st.caption(m_j)
+                    
+        # TELA B: QUANTIDADES E CONFIRMAÇÃO
         else:
             item = st.session_state.item_selecionado
             st.warning(f"**Registrando: {item}**")
@@ -139,27 +169,34 @@ elif nome_selecionado:
                 l1, l2, l3, l4 = st.columns(4)
                 with l1: 
                     q05 = st.number_input("Garrafa 0.5 L", 0, 10, 0)
-                    for _ in range(q05): lista_final.append("0.5 L")
+                    for _ in range(q05): 
+                        lista_final.append("0.5 L")
                 with l2: 
                     q10 = st.number_input("Garrafa 1.0 L", 0, 10, 0)
-                    for _ in range(q10): lista_final.append("1.0 L")
+                    for _ in range(q10): 
+                        lista_final.append("1.0 L")
                 with l3: 
                     q15 = st.number_input("Garrafa 1.5 L", 0, 10, 0)
-                    for _ in range(q15): lista_final.append("1.5 L")
+                    for _ in range(q15): 
+                        lista_final.append("1.5 L")
                 with l4: 
                     q18 = st.number_input("Garrafa 1.8 L", 0, 10, 0)
-                    for _ in range(q18): lista_final.append("1.8 L")
+                    for _ in range(q18): 
+                        lista_final.append("1.8 L")
                 
                 l5, l6, l7 = st.columns(3)
                 with l5: 
                     q20 = st.number_input("Garrafa 2.0 L", 0, 10, 0)
-                    for _ in range(q20): lista_final.append("2.0 L")
+                    for _ in range(q20): 
+                        lista_final.append("2.0 L")
                 with l6: 
                     q25 = st.number_input("Garrafa 2.5 L", 0, 10, 0)
-                    for _ in range(q25): lista_final.append("2.5 L")
+                    for _ in range(q25): 
+                        lista_final.append("2.5 L")
                 with l7: 
                     q35 = st.number_input("Garrafa 3.5 L", 0, 10, 0)
-                    for _ in range(q35): lista_final.append("3.5 L")
+                    for _ in range(q35): 
+                        lista_final.append("3.5 L")
                     
                 st.write("**Outro tamanho de garrafa?**")
                 c_out1, c_out2 = st.columns(2)
@@ -168,11 +205,13 @@ elif nome_selecionado:
                 with c_out2: 
                     qtd_outro = st.number_input("Quantidade dessa garrafa:", 0, 10, 0)
                     for _ in range(qtd_outro):
-                        if litro_outro > 0: lista_final.append(f"{litro_outro} L")
+                        if litro_outro > 0: 
+                            lista_final.append(f"{litro_outro} L")
 
             elif item == "MARMITA":
                 qm = st.number_input("Quantidade de Marmitas:", 1, 10, 1)
-                for _ in range(qm): lista_final.append("1 UN")
+                for _ in range(qm): 
+                    lista_final.append("1 UN")
             else:
                 st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
                 lista_final.append("1 UN")
@@ -193,41 +232,57 @@ elif nome_selecionado:
                 if st.button("✅ CONFIRMAR REGISTRO", type="primary", use_container_width=True, disabled=not assinatura):
                     try:
                         cod = str(uuid.uuid4())[:8].upper()
-                        dt, hr = datetime.now().strftime("%d/%m/%Y"), datetime.now().strftime("%H:%M:%S")
+                        dt = datetime.now().strftime("%d/%m/%Y")
+                        hr = datetime.now().strftime("%H:%M:%S")
+                        
                         for lit in lista_final:
                             supabase.table("registros").insert({
-                                "data": dt, "hora": hr, "colaborador": nome_selecionado, 
-                                "tipo": item, "litros": lit, "codigo_auditoria": cod
+                                "data": dt, 
+                                "hora": hr, 
+                                "colaborador": nome_selecionado, 
+                                "tipo": item, 
+                                "litros": lit, 
+                                "codigo_auditoria": cod
                             }).execute()
+                            
                         st.success("✅ Registro concluído com sucesso!")
                         st.session_state.item_selecionado = None
                         st.session_state.usuario_autenticado = False 
                         st.balloons()
-                    except Exception as e: st.error(f"Erro: {e}")
+                        
+                    except Exception as e: 
+                        st.error(f"Erro: {e}")
 
-# --- PORTAL DE MEDIÇÃO COM FILTRO POR PERÍODO ---
+# ==========================================
+# PORTAL DE MEDIÇÃO (ADMIN) COM FILTRO POR PERÍODO
+# ==========================================
 st.sidebar.markdown("---")
 if st.sidebar.checkbox("Portal de Medição"):
     pw_admin = st.sidebar.text_input("Senha Admin:", type="password")
+    
     if pw_admin == "Aura@2026":
         st.header("📊 Filtro de Medição")
+        
         col_i, col_f = st.columns(2)
         with col_i:
-            d_inicio = st.date_input("De:", datetime.now() - timedelta(days=7))
+            # FORMATO BRASILEIRO APLICADO AQUI: format="DD/MM/YYYY"
+            d_inicio = st.date_input("Data Início:", datetime.now() - timedelta(days=30), format="DD/MM/YYYY")
         with col_f:
-            d_fim = st.date_input("Até:", datetime.now())
+            # FORMATO BRASILEIRO APLICADO AQUI: format="DD/MM/YYYY"
+            d_fim = st.date_input("Data Fim:", datetime.now(), format="DD/MM/YYYY")
 
-        if st.button("🔍 CARREGAR DADOS", use_container_width=True):
+        if st.button("🔍 CARREGAR DADOS DO PERÍODO", use_container_width=True):
             try:
                 res_adm = supabase.table("registros").select("*").execute()
                 df = pd.DataFrame(res_adm.data)
+                
                 if not df.empty:
                     df['data_dt'] = pd.to_datetime(df['data'], format='%d/%m/%Y').dt.date
                     mask = (df['data_dt'] >= d_inicio) & (df['data_dt'] <= d_fim)
                     df_filtrado = df.loc[mask].drop(columns=['data_dt'])
                     
                     if not df_filtrado.empty:
-                        st.write(f"Encontrados: {len(df_filtrado)} registros.")
+                        st.write(f"Encontrados: {len(df_filtrado)} registros neste período.")
                         df_exibir = df_filtrado[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
                         st.dataframe(df_exibir, use_container_width=True)
                         
@@ -235,7 +290,17 @@ if st.sidebar.checkbox("Portal de Medição"):
                         with pd.ExcelWriter(output, engine='openpyxl') as writer:
                             df_exibir.to_excel(writer, index=False)
                         
-                        st.download_button("📥 BAIXAR EXCEL", output.getvalue(), f"Medicao_{d_inicio}_{d_fim}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+                        st.download_button(
+                            label="📥 BAIXAR EXCEL DO PERÍODO", 
+                            data=output.getvalue(), 
+                            file_name=f"Medicao_{d_inicio.strftime('%d_%m_%Y')}_a_{d_fim.strftime('%d_%m_%Y')}.xlsx", 
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                            use_container_width=True
+                        )
                     else:
-                        st.warning("Nenhum registro para este período.")
-            except Exception as e: st.error(f"Erro: {e}")
+                        st.warning("Nenhum registro encontrado para este período.")
+                else:
+                    st.warning("O banco de dados de registros está vazio.")
+                    
+            except Exception as e: 
+                st.error(f"Erro ao gerar relatório: {e}")
