@@ -6,14 +6,51 @@ import uuid
 import io
 import hashlib
 import time
+try:
+    import pytz
+    _TZ_CUIABA = pytz.timezone("America/Cuiaba")
+    _USE_PYTZ = True
+except ImportError:
+    _USE_PYTZ = False
 
 # ==========================================
 # 1. CONFIGURAÇÃO DA PÁGINA
 # ==========================================
 st.set_page_config(page_title="Totem Aura Apoena", layout="centered")
 
+# --- Ocultar sidebar e rodapé do Streamlit por padrão ---
+# O portal admin é acessado via parâmetro ?admin=1 na URL
+st.markdown("""
+    <style>
+    /* Oculta sidebar no modo totem */
+    [data-testid="stSidebar"] { display: none !important; }
+    /* Oculta footer do Streamlit */
+    footer { visibility: hidden; }
+    /* Botões de ação maiores para toque em tablet */
+    div[data-testid="stButton"] > button {
+        min-height: 3.5rem;
+        font-size: 1.05rem;
+        font-weight: 600;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # ==========================================
-# 2. CONEXÃO COM O BANCO DE DADOS
+# 2. MODO ADMIN — via parâmetro de URL (?admin=1)
+# ==========================================
+params = st.query_params
+MODO_ADMIN_URL = params.get("admin", "0") == "1"
+
+# Se for modo admin, reexibir sidebar
+if MODO_ADMIN_URL:
+    st.markdown("""
+        <style>
+        [data-testid="stSidebar"] { display: block !important; }
+        </style>
+    """, unsafe_allow_html=True)
+
+# ==========================================
+# 3. CONEXÃO COM O BANCO DE DADOS
 # ==========================================
 @st.cache_resource
 def init_connection():
@@ -22,18 +59,21 @@ def init_connection():
         key = st.secrets["SUPABASE_KEY"]
         return create_client(url, key)
     except Exception as e:
-        st.error("Erro nos Secrets do Streamlit.")
+        st.error("Erro nos Secrets do Streamlit. Verifique a configuração.")
         return None
 
 supabase = init_connection()
 
 # ==========================================
-# 3. CONSTANTES
+# 4. CONSTANTES
 # ==========================================
-TIMEOUT_MINUTOS = 5  # Sessão expira após 5 min de inatividade
+TIMEOUT_MINUTOS = 2          # Sessão expira após 2 min de inatividade
+AVISO_TIMEOUT_SEG = 30       # Aviso visual nos últimos 30 segundos
+MAX_TENTATIVAS_SENHA = 5     # Bloqueia após 5 erros de senha
+DATA_CORTE_FALLBACK = datetime(2025, 12, 31)  # Fallback texto puro encerra nesta data
 
 # ==========================================
-# 4. FUNÇÕES DE SEGURANÇA
+# 5. FUNÇÕES DE SEGURANÇA
 # ==========================================
 
 def hash_senha(senha: str) -> str:
@@ -44,26 +84,32 @@ def verificar_senha(senha_digitada: str, senha_db: str) -> bool:
     """
     Verifica senha com suporte a migração:
     - Aceita senhas já em hash (novos cadastros)
-    - Aceita senhas em texto puro (cadastros antigos, para compatibilidade)
+    - Aceita senhas em texto puro apenas até DATA_CORTE_FALLBACK
     """
     if not senha_db:
         return False
     if senha_db == hash_senha(senha_digitada):
         return True
-    # Fallback: suporte a senhas antigas (texto puro) durante período de migração
-    if senha_db == senha_digitada.strip():
-        return True
+    # Fallback: suporte a senhas antigas (texto puro) — expira em DATA_CORTE_FALLBACK
+    if datetime.now() <= DATA_CORTE_FALLBACK:
+        if senha_db == senha_digitada.strip():
+            return True
     return False
 
 # ==========================================
-# 5. FUNÇÕES DE SESSÃO / TIMEOUT
+# 6. FUNÇÕES DE SESSÃO / TIMEOUT
 # ==========================================
+
+def segundos_restantes() -> float:
+    """Retorna segundos restantes antes do timeout. Negativo = expirou."""
+    if "ultimo_ativo" not in st.session_state:
+        return TIMEOUT_MINUTOS * 60
+    decorrido = time.time() - st.session_state.ultimo_ativo
+    return (TIMEOUT_MINUTOS * 60) - decorrido
 
 def verificar_timeout() -> bool:
     """Retorna True se a sessão expirou por inatividade."""
-    if "ultimo_ativo" not in st.session_state:
-        return False
-    return (time.time() - st.session_state.ultimo_ativo) > (TIMEOUT_MINUTOS * 60)
+    return segundos_restantes() <= 0
 
 def atualizar_atividade():
     """Atualiza o timestamp de última atividade."""
@@ -75,23 +121,37 @@ def resetar_sessao():
     st.session_state.item_selecionado = None
     st.session_state.ultimo_nome = None
     st.session_state.chave_identificacao = str(uuid.uuid4())
+    st.session_state.tentativas_senha = 0
     st.session_state.pop("ultimo_ativo", None)
 
 # ==========================================
-# 6. FUNÇÕES DE DADOS
+# 7. FUNÇÕES DE DADOS
 # ==========================================
 
 @st.cache_data(ttl=60)
 def buscar_dados_colaboradores():
     """Busca colaboradores com cache de 60 segundos."""
     try:
-        res = supabase.table("colaboradores").select("nome, senha").execute()
+        res = supabase.table("colaboradores").select("nome, senha, ativo").execute()
+        # Exibe apenas colaboradores ativos (campo 'ativo' = True ou ausente)
+        return [u for u in res.data if u.get("ativo", True) is not False]
+    except:
+        return []
+
+@st.cache_data(ttl=60)
+def buscar_todos_colaboradores():
+    """Busca todos os colaboradores (incluindo inativos) para o admin."""
+    try:
+        res = supabase.table("colaboradores").select("*").execute()
         return res.data
     except:
         return []
 
-def hora_local():
-    """Retorna hora atual no fuso de Mato Grosso (UTC-4)."""
+def hora_local() -> datetime:
+    """Retorna hora atual no fuso de Mato Grosso (America/Cuiaba)."""
+    if _USE_PYTZ:
+        return datetime.now(_TZ_CUIABA).replace(tzinfo=None)
+    # Fallback sem pytz (UTC-4 fixo)
     return datetime.utcnow() - timedelta(hours=4)
 
 def verificar_regras_refeicao(nome, tipo_refeicao):
@@ -161,7 +221,7 @@ def gerar_excel(df_exibir, d_inicio, d_fim):
     return output.getvalue()
 
 # ==========================================
-# 7. INICIALIZAÇÃO DO ESTADO
+# 8. INICIALIZAÇÃO DO ESTADO
 # ==========================================
 defaults = {
     "item_selecionado": None,
@@ -169,13 +229,14 @@ defaults = {
     "chave_identificacao": str(uuid.uuid4()),
     "mostrar_sucesso": False,
     "ultimo_nome": None,
+    "tentativas_senha": 0,
 }
 for key, val in defaults.items():
     if key not in st.session_state:
         st.session_state[key] = val
 
 # ==========================================
-# 8. TIMEOUT AUTOMÁTICO
+# 9. TIMEOUT AUTOMÁTICO
 # ==========================================
 if st.session_state.usuario_autenticado and verificar_timeout():
     resetar_sessao()
@@ -185,46 +246,63 @@ if st.session_state.usuario_autenticado:
     atualizar_atividade()
 
 # ==========================================
-# 9. BARRA LATERAL — ACESSO ADMIN
+# 10. BARRA LATERAL — ACESSO ADMIN (apenas via ?admin=1)
 # ==========================================
-st.sidebar.markdown("---")
-modo_admin = st.sidebar.checkbox("Acessar Portal de Medição")
 senha_admin_ok = False
 
-if modo_admin:
-    pw_admin = st.sidebar.text_input("Senha Admin:", type="password")
-    # Senha vinda dos secrets; fallback local apenas para desenvolvimento
-    senha_admin_correta = st.secrets.get("ADMIN_PASSWORD", "Aura@2026")
-    if pw_admin == senha_admin_correta:
+if MODO_ADMIN_URL:
+    st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/thumb/8/8e/Aura_Minerals_logo.svg/320px-Aura_Minerals_logo.svg.png", use_container_width=True)
+    st.sidebar.markdown("---")
+    pw_admin = st.sidebar.text_input("🔑 Senha Admin:", type="password")
+    senha_admin_correta = st.secrets.get("ADMIN_PASSWORD", "")
+
+    if not senha_admin_correta:
+        st.sidebar.error("⚠️ ADMIN_PASSWORD não configurado nos secrets.")
+    elif pw_admin == senha_admin_correta:
         senha_admin_ok = True
-    elif pw_admin != "":
-        st.sidebar.error("Senha incorreta!")
+    elif pw_admin:
+        st.sidebar.error("❌ Senha incorreta!")
 
 # ==========================================
 # TELA 1: PORTAL ADMINISTRATIVO
 # ==========================================
 if senha_admin_ok:
-    st.title("📊 Portal Administrativo - Medição")
+    st.title("📊 Portal Administrativo — Medição")
     st.markdown("---")
 
-    col_i, col_f = st.columns(2)
-    with col_i:
-        d_inicio = st.date_input("Data Início:", hora_local() - timedelta(days=30), format="DD/MM/YYYY")
-    with col_f:
-        d_fim = st.date_input("Data Fim:", hora_local(), format="DD/MM/YYYY")
+    aba_dados, aba_colaboradores = st.tabs(["📈 Registros e Relatórios", "👥 Gestão de Colaboradores"])
 
-    if st.button("🔍 CARREGAR DADOS DO PERÍODO", use_container_width=True):
-        try:
-            res_adm = supabase.table("registros").select("*").execute()
-            df = pd.DataFrame(res_adm.data)
+    # --- ABA 1: REGISTROS ---
+    with aba_dados:
+        col_i, col_f = st.columns(2)
+        with col_i:
+            d_inicio = st.date_input("Data Início:", hora_local() - timedelta(days=30), format="DD/MM/YYYY")
+        with col_f:
+            d_fim = st.date_input("Data Fim:", hora_local(), format="DD/MM/YYYY")
 
-            if not df.empty:
-                df["data_dt"] = pd.to_datetime(df["data"], format="%d/%m/%Y").dt.date
-                mask = (df["data_dt"] >= d_inicio) & (df["data_dt"] <= d_fim)
-                df_filtrado = df.loc[mask].drop(columns=["data_dt"])
+        if st.button("🔍 CARREGAR DADOS DO PERÍODO", use_container_width=True):
+            try:
+                # ✅ Filtro feito no Supabase — não carrega tabela inteira
+                d_i_str = d_inicio.strftime("%d/%m/%Y")
+                d_f_str = d_fim.strftime("%d/%m/%Y")
 
-                if not df_filtrado.empty:
-                    df_exibir = df_filtrado[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
+                # Gera lista de datas do período para filtrar (formato dd/mm/yyyy)
+                delta = (d_fim - d_inicio).days
+                datas_periodo = [
+                    (d_inicio + timedelta(days=i)).strftime("%d/%m/%Y")
+                    for i in range(delta + 1)
+                ]
+
+                res_adm = (
+                    supabase.table("registros")
+                    .select("*")
+                    .in_("data", datas_periodo)
+                    .execute()
+                )
+                df = pd.DataFrame(res_adm.data)
+
+                if not df.empty:
+                    df_exibir = df[["data", "hora", "colaborador", "tipo", "litros", "codigo_auditoria"]]
 
                     # --- CARDS DE RESUMO ---
                     st.subheader("📈 Resumo do Período")
@@ -233,7 +311,6 @@ if senha_admin_ok:
                     m2.metric("Colaboradores Ativos", df_exibir["colaborador"].nunique())
                     m3.metric("Tipos Distintos", df_exibir["tipo"].nunique())
 
-                    # Tabela de consumo por tipo
                     resumo_tipo = df_exibir.groupby("tipo").size().reset_index(name="Quantidade")
                     st.write("**Consumo por Tipo:**")
                     st.dataframe(resumo_tipo, use_container_width=True, hide_index=True)
@@ -271,7 +348,7 @@ if senha_admin_ok:
                     st.write(f"Exibindo **{len(df_final)}** de {len(df_exibir)} registros.")
                     st.dataframe(df_final, use_container_width=True, hide_index=True)
 
-                    # --- EXPORTAÇÃO (3 abas no Excel) ---
+                    # --- EXPORTAÇÃO ---
                     excel_data = gerar_excel(df_exibir, d_inicio, d_fim)
                     st.download_button(
                         label="📥 BAIXAR EXCEL (Resumo + Detalhes)",
@@ -282,22 +359,92 @@ if senha_admin_ok:
                     )
                 else:
                     st.warning("Nenhum registro encontrado para este período.")
+            except Exception as e:
+                st.error(f"Erro ao gerar relatório: {e}")
+
+    # --- ABA 2: GESTÃO DE COLABORADORES ---
+    with aba_colaboradores:
+        st.subheader("👥 Colaboradores Cadastrados")
+
+        todos_colab = buscar_todos_colaboradores()
+
+        if not todos_colab:
+            st.info("Nenhum colaborador cadastrado.")
+        else:
+            df_colab = pd.DataFrame(todos_colab)
+            colunas_exibir = [c for c in ["nome", "empresa", "ativo"] if c in df_colab.columns]
+            st.dataframe(df_colab[colunas_exibir], use_container_width=True, hide_index=True)
+
+        st.markdown("---")
+
+        # Resetar senha
+        st.write("**🔑 Resetar Senha de Colaborador**")
+        nomes_admin = [u["nome"] for u in todos_colab] if todos_colab else []
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            colab_reset = st.selectbox("Colaborador:", [""] + nomes_admin, key="sel_reset")
+        with col_r2:
+            nova_senha = st.text_input("Nova Senha:", type="password", key="inp_nova_senha")
+
+        if st.button("🔄 RESETAR SENHA", use_container_width=True):
+            if not colab_reset or not nova_senha:
+                st.error("Selecione o colaborador e digite a nova senha.")
             else:
-                st.warning("O banco de dados de registros está vazio.")
-        except Exception as e:
-            st.error(f"Erro ao gerar relatório: {e}")
+                try:
+                    supabase.table("colaboradores").update(
+                        {"senha": hash_senha(nova_senha)}
+                    ).eq("nome", colab_reset).execute()
+                    buscar_dados_colaboradores.clear()
+                    buscar_todos_colaboradores.clear()
+                    st.success(f"✅ Senha de **{colab_reset}** resetada com sucesso.")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+
+        st.markdown("---")
+
+        # Ativar / Desativar colaborador
+        st.write("**🚫 Ativar / Desativar Colaborador**")
+        col_a1, col_a2 = st.columns(2)
+        with col_a1:
+            colab_ativar = st.selectbox("Colaborador:", [""] + nomes_admin, key="sel_ativar")
+        with col_a2:
+            acao_ativo = st.radio("Ação:", ["Ativar", "Desativar"], horizontal=True)
+
+        if st.button("✅ APLICAR ALTERAÇÃO", use_container_width=True):
+            if not colab_ativar:
+                st.error("Selecione um colaborador.")
+            else:
+                try:
+                    novo_status = acao_ativo == "Ativar"
+                    supabase.table("colaboradores").update(
+                        {"ativo": novo_status}
+                    ).eq("nome", colab_ativar).execute()
+                    buscar_dados_colaboradores.clear()
+                    buscar_todos_colaboradores.clear()
+                    st.success(f"✅ Colaborador **{colab_ativar}** {'ativado' if novo_status else 'desativado'}.")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
 
 # ==========================================
 # TELA 2: TOTEM DIGITAL (COLABORADORES)
 # ==========================================
-else:
-    st.title("🚀 Registro Digital - Refeitório")
+elif not MODO_ADMIN_URL:
+    st.title("🚀 Registro Digital — Refeitório")
     st.markdown("---")
 
+    # --- AVISO DE TIMEOUT IMINENTE ---
+    if st.session_state.usuario_autenticado:
+        seg_rest = segundos_restantes()
+        if 0 < seg_rest <= AVISO_TIMEOUT_SEG:
+            st.warning(f"⚠️ Sessão encerrará em **{int(seg_rest)} segundos** por inatividade.")
+
+    # --- FEEDBACK PÓS-REGISTRO ---
     if st.session_state.mostrar_sucesso:
         st.success("✅ Registro concluído com sucesso! O Totem está pronto para o próximo colaborador.")
         st.balloons()
         st.session_state.mostrar_sucesso = False
+        time.sleep(3)
+        st.rerun()
 
     dados_usuarios = buscar_dados_colaboradores()
     nomes_lista = sorted([u["nome"] for u in dados_usuarios])
@@ -305,11 +452,13 @@ else:
         "IDENTIFIQUE-SE:",
         ["➕ NOVO CADASTRO..."] + nomes_lista,
         index=None,
+        placeholder="Toque aqui e selecione seu nome...",
         key=st.session_state.chave_identificacao,
     )
 
     if st.session_state.ultimo_nome != nome_selecionado:
         st.session_state.usuario_autenticado = False
+        st.session_state.tentativas_senha = 0
         st.session_state.ultimo_nome = nome_selecionado
 
     # --- FLUXO 1: NOVO CADASTRO ---
@@ -319,14 +468,18 @@ else:
         with st.form("form_cadastro"):
             n_nome = st.text_input("Nome Completo (Nome e Sobrenome):").strip().upper()
             n_empresa = st.text_input("Empresa:").strip().upper()
-            n_senha = st.text_input("Crie uma Senha de Acesso (Ex: 1234):", type="password").strip()
+            n_senha = st.text_input(
+                "Crie uma Senha de Acesso (Ex: 1234):",
+                type="password",
+                help="Dica: use apenas números para facilitar a digitação no tablet."
+            ).strip()
             btn_salvar = st.form_submit_button("💾 SALVAR CADASTRO", type="primary", use_container_width=True)
 
         if btn_salvar:
             if len(n_nome.split()) < 2:
-                st.error("⚠️ Digite o nome completo.")
+                st.error("⚠️ Digite o nome completo (nome e sobrenome).")
             elif not n_empresa or not n_senha:
-                st.error("⚠️ Todos os campos, incluindo a Senha, são obrigatórios.")
+                st.error("⚠️ Todos os campos são obrigatórios.")
             elif n_nome in nomes_lista:
                 st.warning("⚠️ Este nome já está cadastrado.")
             else:
@@ -334,9 +487,10 @@ else:
                     supabase.table("colaboradores").insert({
                         "nome": n_nome,
                         "empresa": n_empresa,
-                        "senha": hash_senha(n_senha),  # ✅ Salva como hash
+                        "senha": hash_senha(n_senha),
+                        "ativo": True,
                     }).execute()
-                    buscar_dados_colaboradores.clear()  # Invalida cache após novo cadastro
+                    buscar_dados_colaboradores.clear()
                     st.session_state.mostrar_sucesso = True
                     st.session_state.chave_identificacao = str(uuid.uuid4())
                     st.rerun()
@@ -348,19 +502,36 @@ else:
         colab_info = next((u for u in dados_usuarios if u["nome"] == nome_selecionado), None)
         senha_db = str(colab_info["senha"]).strip() if colab_info and colab_info.get("senha") else None
 
-        if not st.session_state.usuario_autenticado:
+        # --- Bloqueio por tentativas ---
+        tentativas = st.session_state.get("tentativas_senha", 0)
+        if tentativas >= MAX_TENTATIVAS_SENHA:
+            st.error(f"🔒 Acesso bloqueado após {MAX_TENTATIVAS_SENHA} tentativas incorretas. Procure o responsável.")
+        elif not st.session_state.usuario_autenticado:
             with st.form("form_login"):
                 st.warning(f"Olá, **{nome_selecionado}**! Digite sua senha para liberar o totem.")
-                senha_digitada = st.text_input("Digite sua Senha:", type="password")
-                btn_login = st.form_submit_button("CONFIRMAR IDENTIDADE", type="primary")
+                if tentativas > 0:
+                    st.caption(f"⚠️ {tentativas}/{MAX_TENTATIVAS_SENHA} tentativas usadas.")
+                senha_digitada = st.text_input(
+                    "Digite sua Senha:",
+                    type="password",
+                    placeholder="Somente números (ex: 1234)",
+                )
+                btn_login = st.form_submit_button("CONFIRMAR IDENTIDADE", type="primary", use_container_width=True)
 
             if btn_login:
                 if verificar_senha(senha_digitada, senha_db):
                     st.session_state.usuario_autenticado = True
+                    st.session_state.tentativas_senha = 0
                     atualizar_atividade()
                     st.rerun()
                 else:
-                    st.error("❌ Senha incorreta! Tente novamente.")
+                    st.session_state.tentativas_senha += 1
+                    restam = MAX_TENTATIVAS_SENHA - st.session_state.tentativas_senha
+                    if restam > 0:
+                        st.error(f"❌ Senha incorreta! Restam {restam} tentativa(s).")
+                    else:
+                        st.error("🔒 Acesso bloqueado. Procure o responsável.")
+                    st.rerun()
 
         if st.session_state.usuario_autenticado:
 
@@ -374,30 +545,38 @@ else:
                         resetar_sessao()
                         st.rerun()
 
-                # Info de horários visível antes da escolha
                 st.caption(
-                    f"⏰ Horário atual (MT): **{hora_local().strftime('%H:%M')}** "
-                    "| 🍽️ Almoço: 10h–14h | 🌙 Jantar: 20h–00h"
+                    f"⏰ Horário (MT): **{hora_local().strftime('%H:%M')}** "
+                    f"| 🍽️ Almoço: 10h–14h | 🌙 Jantar: 20h–00h"
+                    f" | ⏱️ Sessão expira em {int(max(segundos_restantes(), 0) // 60)}min"
                 )
                 st.markdown("---")
+                st.write("**O que deseja registrar?**")
 
-                c1, c2, c3, c4, c5 = st.columns(5)
+                # ✅ Layout 3+2 para botões maiores e mais fáceis de tocar
+                c1, c2, c3 = st.columns(3)
                 with c1:
                     if st.button("☕\nCAFÉ", use_container_width=True):
                         st.session_state.item_selecionado = "CAFÉ"
+                        atualizar_atividade()
                         st.rerun()
                 with c2:
                     if st.button("🍵\nCHÁ", use_container_width=True):
                         st.session_state.item_selecionado = "CHÁ"
+                        atualizar_atividade()
                         st.rerun()
                 with c3:
                     if st.button("🍱\nMARMITA", use_container_width=True):
                         st.session_state.item_selecionado = "MARMITA"
+                        atualizar_atividade()
                         st.rerun()
+
+                c4, c5 = st.columns(2)
                 with c4:
                     p_a, m_a = verificar_regras_refeicao(nome_selecionado, "ALMOÇO")
                     if st.button("🍽️\nALMOÇO", disabled=not p_a, use_container_width=True):
                         st.session_state.item_selecionado = "ALMOÇO"
+                        atualizar_atividade()
                         st.rerun()
                     if not p_a:
                         st.caption(m_a)
@@ -405,6 +584,7 @@ else:
                     p_j, m_j = verificar_regras_refeicao(nome_selecionado, "JANTAR")
                     if st.button("🌙\nJANTAR", disabled=not p_j, use_container_width=True):
                         st.session_state.item_selecionado = "JANTAR"
+                        atualizar_atividade()
                         st.rerun()
                     if not p_j:
                         st.caption(m_j)
@@ -439,7 +619,7 @@ else:
                         st.info("Regra Corporativa: Limite de 1 unidade por pessoa/turno.")
 
                     st.markdown("---")
-                    assinatura = st.checkbox("Declaro e confirmo a retirada dos itens preenchidos acima.")
+                    assinatura = st.checkbox("✍️ Declaro e confirmo a retirada dos itens preenchidos acima.")
 
                     c_can, c_con = st.columns(2)
                     with c_can:
@@ -449,9 +629,11 @@ else:
 
                 if btn_cancelar:
                     st.session_state.item_selecionado = None
+                    atualizar_atividade()
                     st.rerun()
 
                 if btn_confirmar:
+                    atualizar_atividade()
                     lista_final = []
                     if item in ["CAFÉ", "CHÁ"]:
                         for _ in range(q05): lista_final.append("0.5 L")
@@ -472,7 +654,7 @@ else:
                     if len(lista_final) == 0:
                         st.error("⚠️ Adicione a quantidade antes de confirmar.")
                     elif not assinatura:
-                        st.error("⚠️ Você precisa marcar a caixinha declarando a retirada antes de confirmar.")
+                        st.error("⚠️ Marque a caixinha de declaração antes de confirmar.")
                     else:
                         try:
                             inserir_registros(nome_selecionado, item, lista_final)
@@ -481,3 +663,7 @@ else:
                             st.rerun()
                         except Exception as e:
                             st.error(f"Erro: {e}")
+
+elif MODO_ADMIN_URL and not senha_admin_ok:
+    st.title("🔐 Portal Administrativo")
+    st.info("Digite a senha na barra lateral para acessar.")
